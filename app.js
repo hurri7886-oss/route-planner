@@ -764,11 +764,16 @@ function renameDepot(depId, name){
   save(); render();
   return true;
 }
-function updateDepotDetails(depId, name, address){
+function updateDepotDetails(depId, name, address, lat, lng){
   const dep = depotById(depId); if (!dep) return false;
   name = String(name == null ? "" : name).trim();
   if (name) dep.name = name;
   dep.address = String(address == null ? "" : address).trim();
+  lat = Math.round((+lat) * 1e6) / 1e6; lng = Math.round((+lng) * 1e6) / 1e6;
+  if (isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180){
+    dep.lat = lat; dep.lng = lng;
+    state.routes.forEach(recalcRoute); // km/mins from the new point
+  }
   save(); render();
   return true;
 }
@@ -780,6 +785,8 @@ function buildDepotPopup(dep){
     `<br><small>Drag this pin to move the dispatch point.</small>` +
     `<div class="dp-edit"><label>Rename <input class="dp-name-input" value="${dep.name}" aria-label="Dispatch point name"></label>` +
     `<label>Address <input class="dp-addr-input" value="${dep.address || ""}" placeholder="Full street address" aria-label="Dispatch point address"></label>` +
+    `<label>Latitude <input class="dp-lat-input" type="number" step="any" value="${dep.lat}" aria-label="Latitude"></label>` +
+    `<label>Longitude <input class="dp-lng-input" type="number" step="any" value="${dep.lng}" aria-label="Longitude"></label>` +
     `<button type="button" class="btn small primary dp-save">Save</button></div>`;
   return el;
 }
@@ -853,7 +860,9 @@ function drawLeaflet(dr){
       const btn = popEl.querySelector(".dp-save");
       const input = popEl.querySelector(".dp-name-input");
       const addr = popEl.querySelector(".dp-addr-input");
-      if (btn) btn.onclick = ()=>{ updateDepotDetails(dep.id, input ? input.value : "", addr ? addr.value : ""); };
+      const latI = popEl.querySelector(".dp-lat-input");
+      const lngI = popEl.querySelector(".dp-lng-input");
+      if (btn) btn.onclick = ()=>{ updateDepotDetails(dep.id, input ? input.value : "", addr ? addr.value : "", latI ? latI.value : "", lngI ? lngI.value : ""); };
     });
     mk.on("dragend", ()=>{
       const ll = mk.getLatLng();
