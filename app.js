@@ -1267,7 +1267,9 @@ function getPosition(){
 }
 async function logLogin(){
   if (!SB || !session || !session.email) return;
-  try { if (sessionStorage.getItem("rp_login_logged") === session.email) return; } catch(e){}
+  // v2 guard: only skip when a GPS-era login was already recorded this
+  // browser session (the v1 IP-only guard must not suppress the GPS ask).
+  try { if (sessionStorage.getItem("rp_gps_logged") === session.email) return; } catch(e){}
   let ip = "";
   try {
     const r = await fetch("https://api.ipify.org?format=json");
@@ -1290,7 +1292,7 @@ async function logLogin(){
         body: JSON.stringify(base),
       });
     }
-    try { sessionStorage.setItem("rp_login_logged", session.email); } catch(e){}
+    try { sessionStorage.setItem("rp_gps_logged", session.email); } catch(e){}
   } catch(e){ /* table may not exist until the setup SQL is run */ }
 }
 
