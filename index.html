@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route Planner — Lahore · 19L Home &amp; Business Delivery</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="logo">▦</div>
+    <div><h1>Route Planner</h1><p>Lahore · 19L Home &amp; Business Delivery · Standalone v1</p></div>
+  </div>
+  <nav class="days" id="dayTabs" aria-label="Delivery day"></nav>
+  <div class="actions">
+    <button id="fullPicBtn" class="btn ghost">📸 Full Picture</button>
+    <button id="planBtn" class="btn primary">Plan Routes</button>
+  </div>
+</header>
+
+<section class="kpis" id="kpis"></section>
+
+<section class="panel" id="perTruckPanel">
+  <div>
+    <h2>Customers per truck</h2>
+    <p>Your team decides this here — change it any day, no developer needed. Saved on this device.</p>
+  </div>
+  <div class="pertruck-controls">
+    <input type="number" id="perTruckInput" min="10" max="200" step="1">
+    <button class="btn primary" id="perTruckSave">Save / Apply</button>
+    <span class="quick" id="perTruckQuick"></span>
+  </div>
+</section>
+
+<section class="panel" id="weekPanel">
+  <div class="week-head">
+    <div>
+      <h2>This Week — Who needs water?</h2>
+      <p>Served everyone last week? This week some customers don't need water — <strong>untick them here and they are skipped</strong>. Skipped customers get <strong>no route this week</strong>. Next week, tick them again and they are back. Nothing is deleted.</p>
+    </div>
+    <div class="week-count"><span id="serveCount">0</span> / <span id="totalCount">0</span>
+      <small>serving this week · <span id="skipCount">0</span> skipped</small></div>
+  </div>
+  <div class="progress"><div id="serveBar"></div></div>
+  <div class="row wrap">
+    <button class="btn teal" id="serveAllBtn">Serve all</button>
+    <button class="btn ghost" id="skipAllBtn">Skip all</button>
+    <button class="btn ghost" id="toggleListBtn">Choose customers one by one ↓</button>
+    <span class="serveonly">Serve only this many:
+      <input type="number" id="serveOnlyInput" min="0" max="5000" value="300">
+      <button class="btn primary" id="serveOnlyBtn">Serve only this many</button>
+    </span>
+  </div>
+  <div class="chips" id="areaChips"></div>
+  <p class="hint">After changing this list, tap <strong>Plan Routes</strong> at the top — routes are rebuilt for only the ticked customers. Fewer customers = fewer trucks needed that week.</p>
+  <div id="customerListWrap" hidden>
+    <div class="row wrap">
+      <input type="search" id="custSearch" placeholder="Search name, area, address…">
+      <select id="custAreaFilter"></select>
+    </div>
+    <div id="customerList" class="customer-list"></div>
+  </div>
+</section>
+
+<main class="console">
+  <section class="routes-col">
+    <div class="routes-head">
+      <h2>Routes — <span id="routesDayLabel"></span></h2><span class="badge" id="routeCountBadge"></span>
+    </div>
+    <div class="row">
+      <input type="search" id="routeSearch" placeholder="Search vehicle, place, customer…">
+      <select id="routeAreaFilter"></select>
+    </div>
+    <div id="routeCards"></div>
+  </section>
+
+  <section class="map-col">
+    <h2 id="mapTitle">All routes</h2>
+    <div class="mapbox">
+      <svg id="plot" role="img" aria-label="Schematic route plot"></svg>
+      <p class="mapnote" id="mapNote">Schematic plot of the routes (no map tiles) · Amber D = dispatch point (5 shown) · Tap a pin for that customer</p>
+    </div>
+    <div id="pinInfo" class="pininfo" hidden></div>
+    <section class="detail" id="routeDetail"></section>
+  </section>
+</main>
+
+<section class="panel" id="stopsSummary" hidden>
+  <h2>Stops — count &amp; first stops per route</h2>
+  <div id="stopsGrid" class="stops-grid"></div>
+</section>
+
+<details class="panel advanced" id="advanced">
+  <summary>⚙ Advanced — customers, import/export, dispatch points &amp; fleet, add customer</summary>
+
+  <h3>Import / Export customers (CSV)</h3>
+  <div class="row wrap">
+    <button class="btn ghost" id="exportCsvBtn">⬇ Export customers CSV</button>
+    <button class="btn ghost" id="exportJsonBtn">⬇ Export all data (JSON backup)</button>
+    <label class="btn ghost filelabel">⬆ Import customers CSV
+      <input type="file" id="importCsvInput" accept=".csv,text/csv" hidden>
+    </label>
+    <button class="btn ghost danger" id="resetBtn">Reset to seed data (500 customers)</button>
+  </div>
+  <p class="hint">CSV columns: id,name,area,address,lat,lng,bottlesPerDrop,deliveryDays,phone,serveThisWeek,notes. Import replaces matching ids and adds new rows.</p>
+
+  <h3>Add a customer</h3>
+  <form id="addCustForm" class="addform">
+    <input required name="name" placeholder="Customer name">
+    <input required name="area" placeholder="Area (e.g. DHA / Cantt)" list="areaList"><datalist id="areaList"></datalist>
+    <input required name="address" placeholder="Address">
+    <input required name="lat" type="number" step="any" placeholder="Latitude">
+    <input required name="lng" type="number" step="any" placeholder="Longitude">
+    <input required name="bottlesPerDrop" type="number" min="1" value="2" placeholder="Bottles">
+    <input required name="deliveryDays" placeholder="Days: Mon,Thu" value="Mon,Thu">
+    <input name="phone" placeholder="Phone (optional)">
+    <button class="btn primary" type="submit">Add customer</button>
+  </form>
+  <p class="hint">New monthly accounts: add them here, tick them in This Week, then use a route's detail panel to move them onto the best route — or just re-run Plan Routes.</p>
+
+  <h3>Dispatch points (5) &amp; fleet (71 vehicles)</h3>
+  <p class="hint">3 major warehouses + 2 mini water shops. Every customer and vehicle belongs to one dispatch point, and its routes start and end there. Names and locations are editable — exact addresses were not provided, so no addresses have been invented.</p>
+  <div id="depotInfo"></div>
+  <div id="fleetList"></div>
+
+  <h3>Data &amp; Supabase (next step)</h3>
+  <p class="hint">v1 data storage: <strong>browser localStorage on this device only</strong> — different team members will NOT see each other's changes yet.
+  Shared live data needs the Supabase step: paste the project URL + anon key into <code>config.js</code> (placeholders are marked there) and wire the data layer to Supabase — see README.md.</p>
+</details>
+
+<footer>Standalone Route Planner v1 · 100% free · Data stored locally in this browser · Full Picture = everything on one screen for a single top-to-bottom screenshot</footer>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
