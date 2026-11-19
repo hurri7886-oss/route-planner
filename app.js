@@ -625,6 +625,7 @@ function render(){
     </article>`;
   }).join("") || `<p class="hint">No routes for ${selectedDay} yet — tick customers above and tap Plan Routes.</p>`;
   document.querySelectorAll(".route-card").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.route; mapFocus = el.dataset.route; render(); });
+  renderTimeline(dr);
 
   renderMap(dr);
   renderStopPanel();
@@ -680,6 +681,40 @@ function renderCustomerList(){
     || `<p class="hint">No customers match.</p>`;
   document.querySelectorAll("[data-cust]").forEach(cb=> cb.onchange = ()=>{
     const c = custById(+cb.dataset.cust); if (c){ c.serveThisWeek = cb.checked; save(); render(); } });
+}
+let routeView = "cards"; // "cards" | "timeline" (Locus-style Gantt)
+function fmtClock(minsFromMidnight){
+  minsFromMidnight = Math.round(minsFromMidnight);
+  let h = Math.floor(minsFromMidnight/60), m = minsFromMidnight%60;
+  const ap = h >= 12 ? "PM" : "AM"; h = h % 12; if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2,"0")} ${ap}`;
+}
+function renderTimeline(dr){
+  const wrap = $("#routeTimeline"); if (!wrap) return;
+  const cards = $("#routeCards");
+  const isTl = routeView === "timeline";
+  wrap.hidden = !isTl; if (cards) cards.style.display = isTl ? "none" : "";
+  const vc = $("#viewCardsBtn"), vt = $("#viewTimelineBtn");
+  if (vc && vt){ vc.className = "btn small " + (!isTl ? "primary" : "ghost"); vt.className = "btn small " + (isTl ? "primary" : "ghost"); }
+  if (!isTl) return;
+  const START = 8*60; // routes leave the dispatch point at 8:00 AM (estimate)
+  wrap.innerHTML = dr.map((r,i)=>{
+    const veh = vehById(r.vehicleId);
+    const color = COLORS[i % COLORS.length];
+    const loadPct = veh && veh.capacityBottles ? Math.round(r.bottles / veh.capacityBottles * 100) : 0;
+    const over = loadPct > 100;
+    const n = Math.max(1, r.stopIds.length);
+    const seg = r.mins / n;
+    const blocks = r.stopIds.map((id,j)=>`<span class="tl-block" style="background:${color}" title="${j+1}. ${(custById(id)||{}).name||""} · ~${fmtClock(START + seg*j)}">${j+1}</span>`).join("");
+    return `<div class="tl-row ${r.id===selectedRouteId?'selected':''}" data-tlroute="${r.id}">
+      <div class="tl-meta"><span class="tl-tag" style="background:${color}">Route ${i+1}</span>
+        <b>${veh?.label||"Vehicle"}</b> <span class="tl-sub">${veh?.driver||""}</span>
+        <div class="tl-nums">${r.stopIds.length} stops · ${r.km} km · <span class="${over?'over':''}">${loadPct}% full</span></div></div>
+      <div class="tl-barwrap"><div class="tl-times"><span>${fmtClock(START)}</span><span>~${r.mins} min</span><span>${fmtClock(START + r.mins)}</span></div>
+        <div class="tl-bar">${blocks}</div></div>
+    </div>`;
+  }).join("") || `<p class="hint">No routes for ${selectedDay} yet — tap Plan Routes.</p>`;
+  wrap.querySelectorAll("[data-tlroute]").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.tlroute; mapFocus = el.dataset.tlroute; render(); });
 }
 function renderPlotSvg(dr){
   const svg = $("#plot");
@@ -1109,6 +1144,8 @@ function wire(){
   };
   $("#custSearch").oninput = renderCustomerList;
   $("#custAreaFilter").onchange = renderCustomerList;
+  const vcb = $("#viewCardsBtn"); if (vcb) vcb.onclick = ()=>{ routeView = "cards"; render(); };
+  const vtb = $("#viewTimelineBtn"); if (vtb) vtb.onclick = ()=>{ routeView = "timeline"; render(); };
   const bso = $("#bulkServeOnlyBtn"); if (bso) bso.onclick = bulkServeOnly;
   const bsk = $("#bulkSkipBtn"); if (bsk) bsk.onclick = bulkSkip;
   const tsh = $("#tickShownBtn"); if (tsh) tsh.onclick = ()=> tickShown(true);
