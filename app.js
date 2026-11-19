@@ -175,6 +175,12 @@ function diffSummary(prev, next){
   if (JSON.stringify(p.vehicles || []) !== JSON.stringify(next.vehicles || []) ||
       JSON.stringify(p.depots || []) !== JSON.stringify(next.depots || []))
     parts.push("Fleet/dispatch points edited");
+  const poolCount = st => DAYS.reduce((s,d)=>{
+    const l = st && st.unassigned && Array.isArray(st.unassigned[d]) ? st.unassigned[d].length : 0; return s + l; }, 0);
+  const pu = poolCount(p), nu = poolCount(next);
+  if (nu > pu) parts.push(`${nu - pu} customer(s) left unassigned`);
+  else if (nu < pu && nu === 0) parts.push("Unassigned cleared");
+  else if (nu !== pu) parts.push(`Unassigned pool changed (${pu} → ${nu})`);
   if (!parts.length && JSON.stringify(pc) !== JSON.stringify(nc))
     parts.push("Customer details edited");
   return parts.length ? parts.join("; ") : "Data updated";
@@ -210,7 +216,7 @@ async function seed(){
     id: c.i, name: c.n, area: c.a, address: c.ad, lat: c.la, lng: c.ln,
     bottlesPerDrop: c.b, deliveryDays: c.d, phone: c.p || "", serveThisWeek: true,
     dispatchId: (s.depots[c.dp] || s.depots[0]).id } : c);
-  state = { customers, vehicles: s.vehicles, depots: s.depots, perTruck: 90, routes: [] };
+  state = { customers, vehicles: s.vehicles, depots: s.depots, perTruck: 90, routes: [], unassigned: {} };
   save();
 }
 
@@ -260,6 +266,7 @@ function recalcRoute(r){
 
 /* ---------- planning ---------- */
 function planRoutes(){
+  const prevUnassigned = totalUnassigned();
   const serving = state.customers.filter(c => c.serveThisWeek);
   if (!serving.length || !state.vehicles.length){ state.routes = []; save(); render(); return; }
   const routes = [];
@@ -302,8 +309,178 @@ function planRoutes(){
     });
   }
   state.routes = routes;
+  state.unassigned = {}; // a fresh plan puts everyone back on routes — pool empties
   selectedRouteId = routes.find(r=>r.day===selectedDay)?.id || routes[0]?.id || null;
+  mapFocus = "ALL";
   save(); render();
+  if (prevUnassigned) alert(`Plan Routes done: ${routes.length} routes built. ${prevUnassigned} unassigned customer(s) were put back onto routes.`);
+}
+
+/* ---------- stop move / reorder / unassigned pool ----------
+   Shared by the route detail panel, the click-a-stop panel and the
+   Unassigned panel, so the capacity rule and recalculation are identical
+   everywhere. The pool lives in state.unassigned = { Mon: [ids], ... }:
+   customers taken off a route for that day on purpose. They stay ticked
+   in This Week and are never deleted; Plan Routes clears the pool. */
+function capacityBlocked(target, c){
+  const tv = vehById(target.vehicleId);
+  if (!tv || !c) return false;
+  const tBottles = target.stopIds.reduce((s,x)=>s+(custById(x)?.bottlesPerDrop||0),0);
+  if (tBottles + (+c.bottlesPerDrop||0) > tv.capacityBottles){
+    alert(`Blocked: that would exceed ${tv.label}'s bottle capacity (${tv.capacityBottles}).`);
+    return true;
+  }
+  return false;
+}
+function moveStopToRoute(r, i, target){
+  const cid = r.stopIds[i];
+  if (cid === undefined || !target || target.id === r.id) return false;
+  if (capacityBlocked(target, custById(cid))) return false;
+  r.stopIds.splice(i,1);
+  target.stopIds.push(cid);
+  recalcRoute(r); recalcRoute(target);
+  if (!r.stopIds.length) state.routes = state.routes.filter(x=>x.id!==r.id);
+  return true;
+}
+function reorderStop(r, i, j){
+  if (j < 0 || j >= r.stopIds.length || i === j) return false;
+  [r.stopIds[i], r.stopIds[j]] = [r.stopIds[j], r.stopIds[i]];
+  recalcRoute(r);
+  return true;
+}
+function unassignedList(day){
+  if (!state.unassigned || typeof state.unassigned !== "object" || Array.isArray(state.unassigned)) state.unassigned = {};
+  if (!Array.isArray(state.unassigned[day])) state.unassigned[day] = [];
+  return state.unassigned[day];
+}
+function unassignedCustomers(day){
+  return unassignedList(day).map(custById).filter(c=>c && c.serveThisWeek);
+}
+function totalUnassigned(){ return DAYS.reduce((s,d)=>s + unassignedCustomers(d).length, 0); }
+function removeStopToUnassigned(r, i){
+  const cid = r.stopIds[i];
+  if (cid === undefined) return null;
+  const day = r.day;
+  r.stopIds.splice(i,1);
+  recalcRoute(r);
+  if (!r.stopIds.length) state.routes = state.routes.filter(x=>x.id!==r.id);
+  const list = unassignedList(day);
+  if (!list.includes(cid)) list.push(cid);
+  return cid;
+}
+function addCustomerToRoute(custId, target){
+  const c = custById(custId);
+  if (!c || !target) return false;
+  if (capacityBlocked(target, c)) return false;
+  target.stopIds.push(custId);
+  recalcRoute(target);
+  const list = unassignedList(target.day);
+  const ix = list.indexOf(custId);
+  if (ix >= 0) list.splice(ix,1);
+  return true;
+}
+
+/* ---------- click-a-stop panel (in #pinInfo) ----------
+   Opened by clicking a stop pin on the street map OR the schematic
+   plot, and by clicking an unassigned pin (routeId = null mode). */
+let panelStop = null; // {custId, routeId|null}
+function showStopPanel(custId, routeId){ panelStop = { custId, routeId: routeId || null }; renderStopPanel(); }
+function closeStopPanel(){ panelStop = null; renderStopPanel(); }
+function renderStopPanel(){
+  const info = $("#pinInfo");
+  if (!info) return;
+  if (!panelStop){ info.hidden = true; info.innerHTML = ""; return; }
+  const c = custById(panelStop.custId);
+  if (!c){ panelStop = null; info.hidden = true; info.innerHTML = ""; return; }
+  const r = panelStop.routeId ? state.routes.find(x=>x.id===panelStop.routeId) : null;
+  const idx = r ? r.stopIds.indexOf(c.id) : -1;
+  if (panelStop.routeId && (!r || idx < 0)){ panelStop = null; info.hidden = true; info.innerHTML = ""; return; }
+  info.hidden = false;
+  const meta = `${c.address}<br>${c.area} · ${c.bottlesPerDrop} bottles · ${c.deliveryDays}${c.phone ? ` · ${c.phone}` : ""}`;
+  if (!r){ // unassigned mode: offer Add to route for the selected day
+    const dr = dayRoutes();
+    info.innerHTML = `
+      <div class="sp-head"><span class="sp-title">⚠ <strong>${c.name}</strong> — unassigned (${selectedDay})</span>
+      <button class="sp-close" id="spClose" title="Close">✕</button></div>
+      <p class="sp-meta">${meta}</p>
+      <p class="sp-meta">This customer is not on any route for ${selectedDay} yet.</p>
+      <div class="sp-controls">
+        <select id="spAddSel">${dr.map(o=>`<option value="${o.id}">${vehById(o.vehicleId)?.label||"Vehicle"} (${o.stopIds.length} stops)</option>`).join("")}</select>
+        <button class="btn small primary" id="spAddBtn" ${dr.length ? "" : "disabled"}>Add to route</button>
+      </div>`;
+    info.querySelector("#spClose").onclick = closeStopPanel;
+    const addBtn = info.querySelector("#spAddBtn");
+    if (addBtn) addBtn.onclick = ()=>{
+      const target = state.routes.find(x=>x.id===info.querySelector("#spAddSel").value);
+      if (target && addCustomerToRoute(c.id, target)){
+        selectedRouteId = target.id; mapFocus = target.id;
+        panelStop = { custId: c.id, routeId: target.id };
+        save();
+      }
+      render();
+    };
+    return;
+  }
+  const veh = vehById(r.vehicleId);
+  const others = state.routes.filter(x=>x.day===r.day && x.id!==r.id);
+  info.innerHTML = `
+    <div class="sp-head"><span class="sp-title">Stop ${idx+1} of ${r.stopIds.length} — <strong>${c.name}</strong></span>
+    <button class="sp-close" id="spClose" title="Close">✕</button></div>
+    <p class="sp-meta">${meta}</p>
+    <p class="sp-meta">Route: <strong>${veh?.label||""}</strong> · ${r.day} · from ${routeDepot(r).name}</p>
+    <div class="sp-controls">
+      <button class="btn small ghost" id="spUp" ${idx===0 ? "disabled" : ""}>↑ Move up</button>
+      <button class="btn small ghost" id="spDown" ${idx===r.stopIds.length-1 ? "disabled" : ""}>↓ Move down</button>
+      <select id="spMoveSel">${others.map(o=>`<option value="${o.id}">${vehById(o.vehicleId)?.label||"Vehicle"} (${o.stopIds.length} stops)</option>`).join("")}</select>
+      <button class="btn small primary" id="spMoveBtn" ${others.length ? "" : "disabled"}>Move</button>
+      <button class="btn small danger" id="spRemove">Remove from route (keep unassigned)</button>
+    </div>`;
+  info.querySelector("#spClose").onclick = closeStopPanel;
+  info.querySelector("#spUp").onclick = ()=>{ if (reorderStop(r, idx, idx-1)){ save(); render(); } };
+  info.querySelector("#spDown").onclick = ()=>{ if (reorderStop(r, idx, idx+1)){ save(); render(); } };
+  info.querySelector("#spMoveBtn").onclick = ()=>{
+    const target = state.routes.find(x=>x.id===info.querySelector("#spMoveSel").value);
+    if (target && moveStopToRoute(r, idx, target)){
+      selectedRouteId = target.id; mapFocus = target.id;
+      panelStop = { custId: c.id, routeId: target.id };
+      save();
+    }
+    render();
+  };
+  info.querySelector("#spRemove").onclick = ()=>{
+    if (removeStopToUnassigned(r, idx) !== null){
+      panelStop = { custId: c.id, routeId: null };
+      save();
+    }
+    render();
+  };
+}
+
+/* ---------- Unassigned panel (routes column, selected day) ---------- */
+function renderUnassigned(){
+  const panel = $("#unassignedPanel");
+  if (!panel) return;
+  const list = unassignedCustomers(selectedDay);
+  const badge = $("#unassignedBadge");
+  if (badge){ badge.hidden = !list.length; badge.textContent = list.length ? `⚠ ${list.length} unassigned` : ""; }
+  panel.hidden = !list.length;
+  if (!list.length){ $("#unassignedList").innerHTML = ""; return; }
+  $("#unassignedDayLabel").textContent = selectedDay;
+  $("#unassignedCount").textContent = list.length;
+  const dr = dayRoutes();
+  $("#unassignedList").innerHTML = list.map(c=>`
+    <div class="stop"><span class="sp"><strong>${c.name}</strong> — ${c.area} · ${c.bottlesPerDrop} bottles</span>
+    <select data-add-sel="${c.id}">${dr.map(o=>`<option value="${o.id}">${vehById(o.vehicleId)?.label||"Vehicle"} (${o.stopIds.length} stops)</option>`).join("")}</select>
+    <button class="btn small primary" data-add-btn="${c.id}" ${dr.length ? "" : "disabled"}>Add to route</button></div>`).join("");
+  panel.querySelectorAll("[data-add-btn]").forEach(b=> b.onclick = ()=>{
+    const cid = +b.dataset.addBtn;
+    const sel = panel.querySelector(`[data-add-sel="${cid}"]`);
+    const target = state.routes.find(x=>x.id===sel?.value);
+    if (target && addCustomerToRoute(cid, target)){
+      selectedRouteId = target.id; mapFocus = target.id; save();
+    }
+    render();
+  });
 }
 
 /* ---------- rendering ---------- */
@@ -321,7 +498,7 @@ function render(){
   $("#dayTabs").innerHTML = DAYS.map(dy=>
     `<button data-day="${dy}" class="${dy===selectedDay?'active':''}">${dy}</button>`).join("");
   document.querySelectorAll("#dayTabs button").forEach(b=> b.onclick = ()=>{ selectedDay=b.dataset.day;
-    selectedRouteId = dayRoutes()[0]?.id || null; render(); });
+    selectedRouteId = dayRoutes()[0]?.id || null; mapFocus = "ALL"; render(); });
 
   const serving = state.customers.filter(c=>c.serveThisWeek);
   const dr = dayRoutes();
@@ -384,9 +561,11 @@ function render(){
       <a class="btn small ghost" target="_blank" rel="noopener" href="${gmapsLink(r)}" onclick="event.stopPropagation()">Open in Google Maps ↗</a>
     </article>`;
   }).join("") || `<p class="hint">No routes for ${selectedDay} yet — tick customers above and tap Plan Routes.</p>`;
-  document.querySelectorAll(".route-card").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.route; render(); });
+  document.querySelectorAll(".route-card").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.route; mapFocus = el.dataset.route; render(); });
 
-  renderPlot(dr);
+  renderMap(dr);
+  renderStopPanel();
+  renderUnassigned();
   renderDetail();
   renderStopsSummary(dr);
   // filters
@@ -429,7 +608,7 @@ function renderCustomerList(){
   document.querySelectorAll("[data-cust]").forEach(cb=> cb.onchange = ()=>{
     const c = custById(+cb.dataset.cust); if (c){ c.serveThisWeek = cb.checked; save(); render(); } });
 }
-function renderPlot(dr){
+function renderPlotSvg(dr){
   const svg = $("#plot");
   const all = state.customers; if (!all.length){ svg.innerHTML=""; return; }
   const pts = [...(state.depots||[]), ...all];
@@ -454,15 +633,118 @@ function renderPlot(dr){
     <text x="${X(dep.lng)}" y="${Y(dep.lat)+4}" text-anchor="middle" font-size="11" font-weight="800" fill="#4e342e">D</text>
     <text x="${X(dep.lng)}" y="${Y(dep.lat)-16}" text-anchor="middle" font-size="10" font-weight="700" fill="#4e342e">${dep.name}</text></g>`;
   });
+  unassignedCustomers(selectedDay).forEach(c=>{
+    s += `<g class="pin unassigned-pin" data-pin="${c.id}" style="cursor:pointer">
+      <circle cx="${X(c.lng)}" cy="${Y(c.lat)}" r="10" fill="#ffffff" stroke="#616161" stroke-width="2.5" stroke-dasharray="3 2"/>
+      <text x="${X(c.lng)}" y="${Y(c.lat)+3.5}" text-anchor="middle" font-size="10" fill="#616161" font-weight="800">!</text></g>`;
+  });
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = s;
   svg.querySelectorAll(".pin").forEach(p=> p.onclick = ()=>{
-    const c = custById(+p.dataset.pin); selectedRouteId = p.dataset.route;
-    const info = $("#pinInfo"); info.hidden = false;
-    info.innerHTML = c ? `<strong>${c.name}</strong> — ${c.area}<br>${c.address}<br>${c.bottlesPerDrop} bottles · ${c.deliveryDays} · ${c.phone||""} · Route: ${(vehById(dayRoutes().find(r=>r.id===selectedRouteId)?.vehicleId)?.label)||""}` : "";
+    const c = custById(+p.dataset.pin); if (!c) return;
+    const rid = p.dataset.route || null;
+    if (rid) selectedRouteId = rid;
+    showStopPanel(c.id, rid);
     render();
   });
+}
+
+/* ---------- real street map (Leaflet 1.9.4, vendored in vendor/) ----------
+   CARTO light basemap tiles (free, no key). tile.openstreetmap.org is
+   NOT used (its tile policy blocked us before). If Leaflet is missing
+   or the tiles never load, renderMap falls back to the schematic SVG. */
+let lmap = null, lmapLayer = null, lastMapSig = "";
+let tilesFailed = false, tileLoads = 0, tileErrors = 0;
+let mapFocus = "ALL"; // "ALL" = frame the whole day; otherwise a route id to zoom to
+function initLeaflet(){
+  if (lmap) return true;
+  if (typeof L === "undefined") return false;
+  const el = document.getElementById("map");
+  if (!el) return false;
+  try {
+    lmap = L.map(el);
+    const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+      attribution: "© OpenStreetMap contributors © CARTO", subdomains: "abcd", maxZoom: 19 });
+    tiles.on("tileload", ()=>{ tileLoads++; });
+    tiles.on("tileerror", ()=>{
+      tileErrors++;
+      if (!tileLoads && tileErrors >= 6 && !tilesFailed){ // tiles unreachable -> schematic fallback
+        tilesFailed = true;
+        try { lmap.remove(); } catch(e){}
+        lmap = null; lmapLayer = null; lastMapSig = "";
+        render();
+      }
+    });
+    tiles.addTo(lmap);
+    lmapLayer = L.layerGroup().addTo(lmap);
+    if (L.Icon && L.Icon.Default) L.Icon.Default.imagePath = "vendor/images/";
+    window.addEventListener("resize", ()=>{ if (lmap) lmap.invalidateSize(); });
+    return true;
+  } catch(e){ lmap = null; return false; }
+}
+function renderMap(dr){
+  const mapEl = document.getElementById("map"), svg = $("#plot"), note = $("#mapNote");
   $("#mapTitle").textContent = selectedRouteId && dr.length
     ? `Map — ${selectedDay} (${dr.length} routes)` : `All routes — ${selectedDay}`;
+  if (!tilesFailed && initLeaflet()){
+    if (mapEl) mapEl.hidden = false;
+    if (svg) svg.style.display = "none";
+    if (note) note.textContent = "Street map · Amber D = dispatch point · Grey ! = unassigned · Tap a pin for that customer";
+    drawLeaflet(dr);
+  } else {
+    if (mapEl) mapEl.hidden = true;
+    if (svg) svg.style.display = "";
+    if (note) note.textContent = `Schematic plot of the routes (no map tiles) · Amber D = dispatch point (${(state.depots||[]).length} shown) · Grey ! = unassigned · Tap a pin for that customer`;
+    renderPlotSvg(dr);
+  }
+}
+function drawLeaflet(dr){
+  const sig = JSON.stringify([selectedDay, selectedRouteId, mapFocus,
+    dr.map(r=>r.id+":"+r.stopIds.join(",")),
+    (state.depots||[]).map(d=>d.id+":"+d.lat+","+d.lng),
+    unassignedList(selectedDay)]);
+  if (sig === lastMapSig){ if (lmap) lmap.invalidateSize(); return; }
+  lastMapSig = sig;
+  lmapLayer.clearLayers();
+  const allPts = [];
+  (state.depots||[]).forEach(dep=>{
+    L.marker([dep.lat, dep.lng], { icon: L.divIcon({ className: "", html: `<div class="depot-pin">D</div>`, iconSize: [24,24], iconAnchor: [12,12] }) })
+      .bindTooltip(dep.name, { direction: "top", offset: [0,-14] })
+      .bindPopup(`<strong>${dep.name}</strong> (${dep.type})<br>${dep.area||""}`)
+      .addTo(lmapLayer);
+    allPts.push([dep.lat, dep.lng]);
+  });
+  dr.forEach((r,i)=>{
+    const color = COLORS[i % COLORS.length];
+    const stops = r.stopIds.map(custById).filter(Boolean);
+    const dep = routeDepot(r);
+    const pts = [[dep.lat, dep.lng], ...stops.map(c=>[c.lat, c.lng]), [dep.lat, dep.lng]];
+    L.polyline(pts, { color, weight: r.id===selectedRouteId ? 4 : 2.5, opacity: 0.85 }).addTo(lmapLayer);
+    stops.forEach((c,j)=>{
+      const mk = L.marker([c.lat, c.lng], { icon: L.divIcon({ className: "", html: `<div class="stop-pin" style="background:${color}">${j+1}</div>`, iconSize: [22,22], iconAnchor: [11,11] }) });
+      mk.on("click", ()=>{ selectedRouteId = r.id; showStopPanel(c.id, r.id); render(); });
+      mk.addTo(lmapLayer);
+      allPts.push([c.lat, c.lng]);
+    });
+  });
+  unassignedCustomers(selectedDay).forEach(c=>{
+    const mk = L.marker([c.lat, c.lng], { icon: L.divIcon({ className: "", html: `<div class="unassigned-pin">!</div>`, iconSize: [22,22], iconAnchor: [11,11] }) });
+    mk.bindTooltip(`${c.name} — unassigned`, { direction: "top", offset: [0,-14] });
+    mk.on("click", ()=>{ showStopPanel(c.id, null); render(); });
+    mk.addTo(lmapLayer);
+    allPts.push([c.lat, c.lng]);
+  });
+  const focusRoute = mapFocus !== "ALL" ? dr.find(r=>r.id===mapFocus) : null;
+  if (focusRoute){
+    const dep = routeDepot(focusRoute);
+    const stops = focusRoute.stopIds.map(custById).filter(Boolean);
+    const pts = [[dep.lat, dep.lng], ...stops.map(c=>[c.lat, c.lng])];
+    if (pts.length) lmap.fitBounds(pts, { padding: [30,30] });
+  } else if (allPts.length){
+    lmap.fitBounds(allPts, { padding: [25,25] });
+  } else {
+    lmap.setView([31.52, 74.36], 11); // Lahore
+  }
+  setTimeout(()=>{ if (lmap) lmap.invalidateSize(); }, 0);
 }
 function renderDetail(){
   const el = $("#routeDetail");
@@ -489,21 +771,16 @@ function renderDetail(){
   };
   el.querySelectorAll("[data-up],[data-down]").forEach(b=> b.onclick = ()=>{
     const i = +(b.dataset.up ?? b.dataset.down); const j = b.dataset.up !== undefined ? i-1 : i+1;
-    [r.stopIds[i], r.stopIds[j]] = [r.stopIds[j], r.stopIds[i]];
-    recalcRoute(r); save(); render();
+    if (reorderStop(r, i, j)){ save(); render(); }
   });
   el.querySelectorAll("[data-move]").forEach(sel=> sel.onchange = ()=>{
     if (!sel.value) return;
     const target = state.routes.find(x=>x.id===sel.value);
-    const i = +sel.dataset.move; const [cid] = r.stopIds.splice(i,1);
-    const c = custById(cid); const tv = vehById(target.vehicleId);
-    const tBottles = target.stopIds.reduce((s,x)=>s+(custById(x)?.bottlesPerDrop||0),0);
-    if (tv && tBottles + (c?.bottlesPerDrop||0) > tv.capacityBottles){
-      alert(`Blocked: that would exceed ${tv.label}'s bottle capacity (${tv.capacityBottles}).`); render(); return;
+    const i = +sel.dataset.move;
+    if (target && moveStopToRoute(r, i, target)){
+      selectedRouteId = target.id; selectedDay = target.day; mapFocus = target.id; save();
     }
-    target.stopIds.push(cid); recalcRoute(r); recalcRoute(target); // route depot follows target route
-    if (!r.stopIds.length) state.routes = state.routes.filter(x=>x.id!==r.id);
-    selectedRouteId = target.id; selectedDay = target.day; save(); render();
+    render();
   });
 }
 function renderStopsSummary(dr){
@@ -617,7 +894,7 @@ function wire(){
   const soBtn = $("#signOutBtn"); if (soBtn) soBtn.onclick = signOut;
   const rhBtn = $("#refreshHistoryBtn"); if (rhBtn) rhBtn.onclick = loadChangeHistory;
   const adv = document.getElementById("advanced");
-  if (adv) adv.addEventListener("toggle", ()=>{ if (adv.open) loadChangeHistory(); });
+  if (adv) adv.addEventListener("toggle", ()=>{ if (adv.open){ loadChangeHistory(); if (lmap) setTimeout(()=>lmap.invalidateSize(), 60); } });
   $("#perTruckSave").onclick = ()=> setPerTruck($("#perTruckInput").value);
   $("#serveAllBtn").onclick = ()=>{ state.customers.forEach(c=>c.serveThisWeek=true); save(); render(); };
   $("#skipAllBtn").onclick = ()=>{ state.customers.forEach(c=>c.serveThisWeek=false); save(); render(); };
@@ -635,6 +912,7 @@ function wire(){
     document.body.classList.toggle("fullpic");
     $("#fullPicBtn").textContent = document.body.classList.contains("fullpic") ? "✕ Exit Full Picture" : "📸 Full Picture";
     render();
+    if (lmap) setTimeout(()=>lmap.invalidateSize(), 60); // map box changed size in Full Picture
     window.scrollTo(0,0);
   };
   $("#exportCsvBtn").onclick = exportCsv;
@@ -720,6 +998,7 @@ async function boot(){
   if (!fromShared && !load()) await seed();
   if (!state) return;
   if (!state.perTruck) state.perTruck = 90;
+  if (!state.unassigned || typeof state.unassigned !== "object" || Array.isArray(state.unassigned)) state.unassigned = {};
   if (!Array.isArray(state.depots) || !state.depots.length){ localStorage.removeItem(LS_KEY); await seed(); }
   wire(); render(); updateSyncStatus();
 }

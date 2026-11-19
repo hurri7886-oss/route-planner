@@ -58,12 +58,30 @@ by the user (2026-11-19), **not** the earlier sample assumptions
   split when a day's load exceeds the vehicle's bottle capacity
   (Mazda 160 / Shehzore 90 / Ravi 60), stops sequenced nearest-neighbour +
   2-opt on each customer's locked delivery days.
-- Route cards + schematic route plot (pins, lines, dispatch points).
-  **No map tiles are used** (OpenStreetMap tiles returned 403 in the
-  artifact); each route has an **Open in Google Maps** link instead.
+- **Real street map** (Leaflet 1.9.4, vendored in `vendor/` — no CDN at
+  runtime) with free CARTO light basemap tiles (no API key;
+  `tile.openstreetmap.org` is deliberately not used — its tile policy
+  blocked us before). Each route is a coloured polyline from its
+  dispatch point with numbered stop pins in the route colour; amber
+  **D** pins are dispatch points. If Leaflet or the tiles fail to load,
+  the app automatically falls back to the schematic SVG plot. A legend
+  under the map explains the pins. Each route also has an **Open in
+  Google Maps** link.
+- **Click any stop pin** (street map or schematic) to open the stop
+  panel: customer name, address, area, bottles, delivery days, phone,
+  current route/vehicle and stop number — plus **↑/↓ reorder**, a
+  **Move to another route** control (same-day routes; bottle-capacity
+  blocked with a warning), and **Remove from route (keep unassigned)**.
+- **Unassigned pool** — a removed customer is not deleted and stays
+  ticked for the week; it waits in `state.unassigned` per day, shows as
+  a grey dashed **!** pin on the map and in the **⚠ Unassigned** panel
+  under the route cards (with a warning badge by the route count),
+  ready to be added to any route for that day (capacity rules apply).
+  **Plan Routes** replans everyone and empties the pool.
 - Route detail: stops in order, ↑/↓ reorder, move a customer to another
   route (bottle-capacity blocked with a warning), re-optimise one route —
-  all recalculated and saved.
+  all recalculated and saved (same shared move/reorder logic as the
+  stop panel).
 - 📸 Full Picture one-screen overview for a top-to-bottom screenshot.
 - CSV import/export of customers, JSON full backup export, add-customer
   form, editable dispatch point names/locations, reset-to-seed.
@@ -149,4 +167,5 @@ backup export as an extra safety copy.
 | `app.js` | All logic: Supabase Auth login gate, seed load, planning, rendering, import/export, change log + history |
 | `seed1.json` + `seed2.json` | 500 customers (short keys, split in two), 71 vehicles, 5 dispatch points |
 | `config.js` | Supabase project URL + publishable key (v3: shared storage + logins) |
+| `vendor/leaflet.js`, `vendor/leaflet.css`, `vendor/images/` | Leaflet 1.9.4 vendored locally (map library — no CDN at runtime) |
 | `vercel.json` | Static hosting config for Vercel |

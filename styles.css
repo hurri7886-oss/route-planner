@@ -51,6 +51,26 @@ input[type=search],select{padding:8px;border:1px solid #c8d6e2;border-radius:8px
 .over{background:#fdecea;color:#b3261e;border-radius:99px;font-size:11px;padding:2px 8px;font-weight:700}
 .mapbox{background:#eef3f7;border-radius:12px;padding:8px}
 #plot{width:100%;height:430px;display:block}
+#map{width:100%;height:430px;border-radius:8px;z-index:0}
+.leaflet-div-icon{background:transparent;border:none}
+.stop-pin{width:22px;height:22px;border-radius:50%;color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);cursor:pointer}
+.depot-pin{width:24px;height:24px;border-radius:50%;background:#f9a825;color:#4e342e;font-size:12px;font-weight:800;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+.unassigned-pin{width:22px;height:22px;border-radius:50%;background:#fff;color:#616161;font-size:13px;font-weight:800;display:grid;place-items:center;border:2.5px dashed #616161;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer}
+.maplegend{text-align:center;color:#6b7f92;font-size:12px;margin:2px 0 0}
+.maplegend .lg{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;font-size:10px;font-weight:800;vertical-align:-3px;margin:0 2px}
+.maplegend .lg-route{background:#0b84c6}
+.maplegend .lg-unassigned{background:#fff;border:2px dashed #616161;color:#616161}
+.maplegend .lg-depot{background:#f9a825;color:#4e342e}
+.warn-badge{background:#fdecea;color:#b3261e;font-weight:800}
+.unassigned-panel{border:1.5px dashed #9e9e9e;background:#fafafa;border-radius:12px;padding:10px 12px;margin-top:12px}
+.unassigned-panel h3{margin:0 0 2px;font-size:14px;color:#b3261e}
+.unassigned-panel .stop select{flex:1;min-width:110px}
+.pininfo .sp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.pininfo .sp-title{font-size:14px}
+.pininfo .sp-meta{color:#47617a;margin:2px 0}
+.pininfo .sp-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.pininfo .sp-controls select{flex:1;min-width:150px}
+.pininfo .sp-close{border:0;background:transparent;font-size:15px;cursor:pointer;color:#7a5b00;line-height:1;padding:2px 4px}
 .mapnote{color:#6b7f92;font-size:12px;text-align:center;margin:6px 0 2px}
 .pininfo{background:#fff8e1;border:1px solid #f0dfa0;border-radius:10px;padding:10px;margin-top:10px;font-size:13px}
 .detail{margin-top:14px}
@@ -90,6 +110,7 @@ body.fullpic .panel{margin:8px 12px;padding:8px 12px}
 body.fullpic #weekPanel .customer-list,body.fullpic #weekPanel .hint{display:none}
 body.fullpic .console{padding:0 12px;gap:8px}
 body.fullpic #plot{height:300px}
+body.fullpic #map{height:300px}
 body.fullpic .route-card{margin:5px 0;padding:6px 9px}
 body.fullpic .detail .stop:nth-of-type(n+6){display:none}
 @media(max-width:900px){

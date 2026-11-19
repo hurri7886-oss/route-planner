@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Route Planner — Lahore · 19L Home &amp; Business Delivery</title>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="vendor/leaflet.css">
 </head>
 <body>
 <section id="loginScreen" class="login-screen">
@@ -86,20 +87,27 @@
 <main class="console">
   <section class="routes-col">
     <div class="routes-head">
-      <h2>Routes — <span id="routesDayLabel"></span></h2><span class="badge" id="routeCountBadge"></span>
+      <h2>Routes — <span id="routesDayLabel"></span></h2><span class="badge" id="routeCountBadge"></span><span class="badge warn-badge" id="unassignedBadge" hidden></span>
     </div>
     <div class="row">
       <input type="search" id="routeSearch" placeholder="Search vehicle, place, customer…">
       <select id="routeAreaFilter"></select>
     </div>
     <div id="routeCards"></div>
+    <section class="unassigned-panel" id="unassignedPanel" hidden>
+      <h3>⚠ Unassigned — <span id="unassignedDayLabel"></span> (<span id="unassignedCount">0</span>)</h3>
+      <p class="hint">These customers need water this week but are not on a route. Add each one to a route below — or tap its grey <strong>!</strong> pin on the map.</p>
+      <div id="unassignedList"></div>
+    </section>
   </section>
 
   <section class="map-col">
     <h2 id="mapTitle">All routes</h2>
     <div class="mapbox">
+      <div id="map" hidden></div>
       <svg id="plot" role="img" aria-label="Schematic route plot"></svg>
       <p class="mapnote" id="mapNote">Schematic plot of the routes (no map tiles) · Amber D = dispatch point (5 shown) · Tap a pin for that customer</p>
+      <p class="maplegend" id="mapLegend"><span class="lg lg-route"></span> Route stops (numbered, in the route's colour) · <span class="lg lg-unassigned">!</span> Unassigned · <span class="lg lg-depot">D</span> Dispatch point</p>
     </div>
     <div id="pinInfo" class="pininfo" hidden></div>
     <section class="detail" id="routeDetail"></section>
@@ -155,6 +163,7 @@
 </div>
 
 <script src="config.js"></script>
+<script src="vendor/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
