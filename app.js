@@ -1107,8 +1107,7 @@ function parseCsv(text){
    Photon first (fast, no key), Nominatim as fallback. Queries are biased
    to Lahore with a bounding box. Used by Add Customer, CSV import and the
    "fill missing coordinates" sweep. */
-async function geocodeAddress(address, area){
-  const q = [address, area, "Lahore", "Pakistan"].filter(Boolean).join(", ");
+async function geocodeOnce(q){
   try {
     const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&bbox=74.05,31.25,74.65,31.75`);
     if (r.ok){
@@ -1125,6 +1124,31 @@ async function geocodeAddress(address, area){
       if (j && j[0]) return { lat: +j[0].lat, lng: +j[0].lon };
     }
   } catch(e){ /* no result */ }
+  return null;
+}
+function simplifyQueries(address, area){
+  // Local addresses carry house numbers the free maps don't know. Retry
+  // ladder: full address -> without house number -> locality segments only.
+  const qs = [];
+  const addr = String(address || "").trim();
+  qs.push([addr, area, "Lahore", "Pakistan"].filter(Boolean).join(", "));
+  const noHouse = addr
+    .replace(/\b(house|h|plot|flat|building|apartment|app)\s*(no\.?|#)?\s*[A-Za-z0-9][A-Za-z0-9\-\/]*/gi, "")
+    .replace(/^[,\s]+/, "").replace(/\s{2,}/g, " ").trim();
+  if (noHouse && noHouse !== addr) qs.push([noHouse, area, "Lahore", "Pakistan"].filter(Boolean).join(", "));
+  const segs = addr.split(",").map(s=>s.trim()).filter(Boolean);
+  if (segs.length > 1) qs.push([segs.slice(1).join(", "), "Lahore", "Pakistan"].join(", "));
+  if (segs.length > 2) qs.push([segs.slice(2).join(", "), "Lahore", "Pakistan"].join(", "));
+  const words = addr.replace(/,/g, " ").split(/\s+/).filter(Boolean);
+  if (words.length > 5) qs.push(words.slice(-5).join(" ") + ", Lahore, Pakistan");
+  if (words.length > 3) qs.push(words.slice(-3).join(" ") + ", Lahore, Pakistan");
+  return [...new Set(qs)];
+}
+async function geocodeAddress(address, area){
+  for (const q of simplifyQueries(address, area)){
+    const hit = await geocodeOnce(q);
+    if (hit) return hit;
+  }
   return null;
 }
 const sleep = ms => new Promise(res=> setTimeout(res, ms));
@@ -1152,7 +1176,8 @@ async function geocodeMissing(list, progress){
       if (ctr){ c.lat = Math.round(ctr.lat*1e6)/1e6; c.lng = Math.round(ctr.lng*1e6)/1e6; approx++; }
       else failed++;
     }
-    if (i < list.length-1) await sleep(300); // be polite to the free service
+    if (i > 0 && i % 50 === 0) save(); // keep progress — big files take a while
+    if (i < list.length-1) await sleep(200); // be polite to the free service
   }
   return { exact, approx, failed };
 }
