@@ -1217,6 +1217,20 @@ function downloadTemplate(){
   ];
   download(lines.join("\n"), "customers-template.csv", "text/csv");
 }
+const AREA_KEYWORDS = [
+  ["DHA / Cantt", ["askari","dha","cantt","eden avenue","walton","cavalry","air avenue","raya","bedian","sarwar road","mall of lahore"]],
+  ["Gulberg / Garden Town", ["gulberg","garden town","model town","kalma","liberty","noor jahan","faisal town"]],
+  ["Johar Town / Wapda Town", ["johar town","wapda town","valencia","khokhar","pia housing","nfc"]],
+  ["Bahria Town / Valencia", ["bahria","valencia","lake city","dha rahbar","rahbar"]],
+  ["Iqbal Town / Samanabad", ["iqbal town","samanabad","multan road","sanda","islam pura","krishan nagar"]],
+];
+function inferArea(area, address){
+  const known = new Set([...(state.depots||[]).map(d=>d.area), ...state.customers.map(c=>c.area)]);
+  if (area && known.has(area)) return area;
+  const hay = `${area || ""} ${address || ""}`.toLowerCase();
+  for (const [label, keys] of AREA_KEYWORDS) if (keys.some(k=> hay.includes(k))) return label;
+  return area || "Other";
+}
 function importCsv(file){
   file.text().then(text=>{
     const rows = parseCsv(text); if (rows.length < 2) return alert("No data rows found in that CSV.");
@@ -1230,7 +1244,7 @@ function importCsv(file){
       if (!r[ix("name")]){ skipped++; continue; }
       const rec = {
         id: (ix("id")>=0 && +r[ix("id")]) || Math.max(0, ...state.customers.map(c=>c.id)) + 1,
-        name: r[ix("name")], area: ix("area")>=0 && r[ix("area")] ? r[ix("area")] : "Other", address: ix("address")>=0 ? (r[ix("address")] || "") : "",
+        name: r[ix("name")], area: inferArea(ix("area")>=0 ? r[ix("area")] : "", ix("address")>=0 ? (r[ix("address")] || "") : ""), address: ix("address")>=0 ? (r[ix("address")] || "") : "",
         lat: ix("lat")>=0 ? +r[ix("lat")] : 0, lng: ix("lng")>=0 ? +r[ix("lng")] : 0,
         bottlesPerDrop: ix("bottlesPerDrop")>=0 ? (+r[ix("bottlesPerDrop")] || 2) : 2,
         deliveryDays: normalizeDays(ix("deliveryDays")>=0 ? r[ix("deliveryDays")] : ""),
