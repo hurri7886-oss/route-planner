@@ -1,4 +1,4 @@
-# Route Planner — Standalone v1 (Option 2)
+# Route Planner — Standalone v2 (Option 2)
 
 A dependency-free static web app (plain HTML/CSS/JS, no build step, no paid
 maps, no API keys) for the Nestlé Waters Lahore 19L home & business delivery
@@ -29,7 +29,7 @@ by the user (2026-11-19), **not** the earlier sample assumptions
   10–200, quick choices 50/75/90/120). The team changes this daily on the
   main screen; no developer/Muse visit is needed.
 
-## Features (v1)
+## Features (v2)
 
 - Locus-style dispatch console (layout pattern only): day selector Mon–Sat,
   one **Plan Routes** button, KPI strip (routes, customers served, km,
@@ -53,52 +53,48 @@ by the user (2026-11-19), **not** the earlier sample assumptions
 - CSV import/export of customers, JSON full backup export, add-customer
   form, editable dispatch point names/locations, reset-to-seed.
 
-## Data storage — v1 limitation
+## Data storage — v2: Supabase shared database
 
-Data is stored in **browser localStorage on each user's own device**
-(key `route-planner-v2`). Team members do **not** yet share one live
-database, and clearing browser data clears the app's data — use the JSON
-backup export.
+v2 is wired to **Supabase** as the shared team database, so every team
+member works on the same live data:
 
-## Next step: Supabase (shared live database)
+- The whole app state (customers, vehicles, dispatch points, settings,
+  routes) lives in **one row** of `public.app_state`
+  (`id = 'route-planner'`, `state` jsonb) in the project
+  `https://tcvcirrpomlrirkbgikw.supabase.co`.
+- On startup the app reads that row first. If the shared state is empty,
+  it initialises from the bundled seed files and uploads the full state.
+  If Supabase is unreachable, it falls back to the local cache/seed and
+  the header shows **“Offline copy — changes not shared yet”**; when
+  connected it shows **“Shared data: connected”**.
+- Every change is written to **localStorage immediately** (offline cache,
+  key `route-planner-v2`) and **PATCHed to Supabase** (debounced ~800 ms).
+- `config.js` holds the project URL and the **publishable (anon) key**,
+  which is public by design and safe to embed in browser code. The
+  Supabase **secret key must never** go in this app.
+- Table setup (run once in the Supabase SQL Editor): create
+  `public.app_state (id text primary key, state jsonb not null,
+  updated_at timestamptz not null default now())`, enable RLS, add
+  policies allowing the anon role select/insert/update, and insert the
+  row `('route-planner', '{}')`.
 
-Not yet integrated — the user's Supabase project URL and anon key are not
-available yet, and no credentials have been invented.
-`config.js` contains clearly marked placeholders:
-
-```js
-window.RP_CONFIG = { SUPABASE_URL: "", SUPABASE_ANON_KEY: "" };
-```
-
-To finish it: in the user's Supabase project, create tables mirroring the
-state shape (customers, vehicles, depots/dispatch points, planner settings,
-routes), paste the project URL + **anon/public** key (never the
-service_role key or DB password) into `config.js`, and swap the
-`load()`/`save()` localStorage layer in `app.js` for Supabase reads/writes.
+**Pilot security posture:** anyone who has the app link + the publishable
+key can read/write this one `app_state` table (the RLS policies allow the
+anon role full read/write on that table only). That is acceptable for an
+internal pilot; **add user logins (Supabase Auth) and tighten the
+policies before any wider rollout.** Keep using the JSON backup export
+as an extra safety copy.
 
 ## Hosting / deployment
 
-- **GitHub**: repo `route-planner` under `hurri7886-oss`.
-  ⚠ Status at build time: creating the repository through the Muse GitHub
-  connector failed with
-  `403 Resource not accessible by integration` on
-  `POST https://api.github.com/user/repos`, and the repo does not yet exist
-  (GET repo → 404). The account owner needs to either create the empty repo
-  `route-planner` manually on github.com, or adjust the Muse GitHub App
-  installation permissions — after that, these files can be pushed with the
-  connector's `push_files` in one commit.
-- **Vercel**: deploy as a static project (no build command, output = repo
-  root). A direct file deployment via the Vercel connector's
-  `create_deployment` (files under `requestBody`) is the fallback while the
-  GitHub repo is blocked.
-  ⚠ Status at build time: `upload_file` (POST /v2/files) failed with
-  `403 forbidden — Not authorized: Trying to access resource under scope
-  "hurri7886-2286"` (teamId `team_TBQMVES0uYL9Ea2bNr0HUHdF`). The API's
-  recovery step is `authorize_team_access` for that team, but that tool is
-  not in the Muse Vercel connector's reviewed tool list, so the account
-  owner must approve team access / re-authenticate to that scope first.
-  After that, retry the uploads + `create_deployment` and check the
-  deployment's returned URL/status before treating it as live.
+- **GitHub**: repo `route-planner` under `hurri7886-oss`
+  (https://github.com/hurri7886-oss/route-planner) — created by the account
+  owner and added to the Muse GitHub App installation; code is pushed
+  with the connector's `push_files`.
+- **Vercel**: live at https://route-planner-fawn.vercel.app — the owner
+  imported the GitHub repo in the Vercel dashboard (static project, no
+  build command, output = repo root), so **every push to GitHub
+  auto-deploys** to that URL.
   (Seed data is split into `seed1.json`/`seed2.json`, ~65 KB each, so each
   file stays within the connector's upload argument limits.)
 
@@ -110,5 +106,5 @@ service_role key or DB password) into `config.js`, and swap the
 | `styles.css` | Locus-style console styling + Full Picture mode |
 | `app.js` | All logic: seed load, planning, rendering, import/export |
 | `seed1.json` + `seed2.json` | 500 customers (short keys, split in two), 71 vehicles, 5 dispatch points |
-| `config.js` | Supabase placeholders (next step) |
+| `config.js` | Supabase project URL + publishable key (v2 shared storage) |
 | `vercel.json` | Static hosting config for Vercel |

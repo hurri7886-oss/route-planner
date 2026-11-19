@@ -1,6 +1,8 @@
 "use strict";
-/* Route Planner — standalone v1. Data: localStorage on this device.
-   Supabase shared DB is a marked next step (see config.js / README). */
+/* Route Planner — standalone v2. Data: Supabase shared table
+   (public.app_state, one row id='route-planner') is the team database;
+   localStorage on this device is only an offline cache.
+   Config in config.js (publishable key — public-safe by design). */
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat"];
 const COLORS = ["#0b84c6","#e53935","#009688","#fb8c00","#8e24aa","#3949ab","#00897b","#d81b60"];
 const LS_KEY = "route-planner-v2"; // v2: multi-dispatch + real fleet (71 vehicles)
@@ -14,10 +16,53 @@ const vehById = id => state.vehicles.find(v => v.id === id);
 const depotById = id => (state.depots||[]).find(d => d.id === id) || (state.depots||[])[0];
 const routeDepot = r => depotById(r.dispatchId || custById(r.stopIds[0])?.dispatchId);
 
-function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function save(){ cacheLocal(); queueSbSave(); }
+function cacheLocal(){ try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e){} }
 function load(){
   try { const raw = localStorage.getItem(LS_KEY); if (raw) { state = JSON.parse(raw); return true; } } catch(e){}
   return false;
+}
+
+/* ---------- Supabase shared storage ----------
+   Whole app state lives in one row: public.app_state, id='route-planner'.
+   Startup: Supabase first; empty shared state -> seed + upload; unreachable
+   -> localStorage/seed fallback with an "Offline copy" note in the header.
+   Every save(): localStorage immediately + debounced PATCH to Supabase. */
+const SB = (typeof window !== "undefined" && window.RP_CONFIG && window.RP_CONFIG.SUPABASE_URL && window.RP_CONFIG.SUPABASE_ANON_KEY)
+  ? { url: window.RP_CONFIG.SUPABASE_URL.replace(/\/+$/, ""), key: window.RP_CONFIG.SUPABASE_ANON_KEY } : null;
+let sbConnected = false;
+let sbTimer = null;
+function sbHeaders(){ return { apikey: SB.key, Authorization: "Bearer " + SB.key, "Content-Type": "application/json" }; }
+function updateSyncStatus(){
+  const el = document.getElementById("syncStatus");
+  if (!el) return;
+  el.textContent = sbConnected ? "● Shared data: connected" : "● Offline copy — changes not shared yet";
+  el.style.color = sbConnected ? "#7ee2a8" : "#ffb74d";
+}
+async function sbFetchState(){
+  const res = await fetch(`${SB.url}/rest/v1/app_state?id=eq.route-planner&select=state`, { headers: sbHeaders() });
+  if (!res.ok) throw new Error("Supabase GET failed: " + res.status);
+  const rows = await res.json();
+  if (!rows.length) return null;
+  const st = rows[0].state;
+  return typeof st === "string" ? JSON.parse(st) : st;
+}
+async function sbPushState(){
+  const res = await fetch(`${SB.url}/rest/v1/app_state?id=eq.route-planner`, {
+    method: "PATCH",
+    headers: { ...sbHeaders(), Prefer: "return=minimal" },
+    body: JSON.stringify({ state, updated_at: new Date().toISOString() }),
+  });
+  if (!res.ok) throw new Error("Supabase PATCH failed: " + res.status);
+}
+function queueSbSave(){
+  if (!SB) return;
+  clearTimeout(sbTimer);
+  sbTimer = setTimeout(async ()=>{
+    try { await sbPushState(); sbConnected = true; }
+    catch(e){ sbConnected = false; }
+    updateSyncStatus();
+  }, 800);
 }
 async function seed(){
   const [r1, r2] = await Promise.all([fetch("seed1.json"), fetch("seed2.json")]);
@@ -434,7 +479,7 @@ function wire(){
   $("#exportCsvBtn").onclick = exportCsv;
   $("#exportJsonBtn").onclick = ()=> download(JSON.stringify(state, null, 2), "route-planner-backup.json", "application/json");
   $("#importCsvInput").onchange = e=>{ if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ""; };
-  $("#resetBtn").onclick = async ()=>{ if (confirm("Reset all data on THIS device to the original 500-customer seed?")){ localStorage.removeItem(LS_KEY); await seed(); render(); } };
+  $("#resetBtn").onclick = async ()=>{ if (confirm("Reset the SHARED team data to the original 500-customer seed? This replaces everyone's data.")){ localStorage.removeItem(LS_KEY); await seed(); render(); } };
   $("#addCustForm").onsubmit = e=>{
     e.preventDefault();
     const f = new FormData(e.target);
@@ -449,8 +494,22 @@ function wire(){
   };
 }
 (async function init(){
-  if (!load()) await seed();
+  let fromShared = false;
+  if (SB){
+    try {
+      const st = await sbFetchState();
+      sbConnected = true;
+      if (st && Array.isArray(st.customers) && st.customers.length){
+        state = st;               // shared team data wins
+        cacheLocal();             // refresh the offline cache (no re-upload)
+      } else {
+        await seed();             // shared state empty -> seed; save() uploads it
+      }
+      fromShared = true;
+    } catch(e){ sbConnected = false; }  // unreachable -> offline fallback below
+  }
+  if (!fromShared && !load()) await seed();
   if (!state.perTruck) state.perTruck = 90;
   if (!Array.isArray(state.depots) || !state.depots.length){ localStorage.removeItem(LS_KEY); await seed(); }
-  wire(); render();
+  wire(); render(); updateSyncStatus();
 })();

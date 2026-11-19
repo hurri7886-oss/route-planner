@@ -1,13 +1,21 @@
 // ============================================================
-// SUPABASE CONFIG — NEXT STEP (not yet connected)
-// The standalone v1 stores data in each user's browser
-// (localStorage). To make all team members share ONE live
-// database, create a free Supabase project, then paste its
-// Project URL and anon/public key here and integrate the
-// Supabase client (see README.md > "Next step: Supabase").
-// Do NOT paste a service_role key or database password here.
+// SUPABASE CONFIG — CONNECTED (v2 shared team database)
+// The app stores its whole state in one row of the public
+// .app_state table in this Supabase project, so every team
+// member sees and edits the SAME live data. localStorage on
+// each device is kept only as an offline cache.
+//
+// The key below is the project's PUBLISHABLE (anon/public)
+// key. It is public by design — safe to embed in browser
+// code and share with the app link. Row Level Security
+// policies on app_state are what control access.
+//
+// NEVER put the Supabase SECRET key (sb_secret_… /
+// service_role key) or the database password in this file —
+// those give full admin access and must never ship in
+// browser code.
 // ============================================================
 window.RP_CONFIG = {
-  SUPABASE_URL: "",      // e.g. "https://xxxx.supabase.co"  (placeholder — not set)
-  SUPABASE_ANON_KEY: "", // e.g. "eyJ..." public anon key     (placeholder — not set)
+  SUPABASE_URL: "https://tcvcirrpomlrirkbgikw.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_voPefd8q8EdfuSDUsNjdLQ_lHqWs4J-",
 };

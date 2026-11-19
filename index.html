@@ -9,7 +9,8 @@
 <body>
 <header class="topbar">
   <div class="brand"><div class="logo">▦</div>
-    <div><h1>Route Planner</h1><p>Lahore · 19L Home &amp; Business Delivery · Standalone v1</p></div>
+    <div><h1>Route Planner</h1><p>Lahore · 19L Home &amp; Business Delivery · Standalone v2</p>
+    <p><span id="syncStatus" style="font-size:12px;font-weight:600">● Connecting to shared data…</span></p></div>
   </div>
   <nav class="days" id="dayTabs" aria-label="Delivery day"></nav>
   <div class="actions">
@@ -23,7 +24,7 @@
 <section class="panel" id="perTruckPanel">
   <div>
     <h2>Customers per truck</h2>
-    <p>Your team decides this here — change it any day, no developer needed. Saved on this device.</p>
+    <p>Your team decides this here — change it any day, no developer needed. Saved to the shared team database.</p>
   </div>
   <div class="pertruck-controls">
     <input type="number" id="perTruckInput" min="10" max="200" step="1">
@@ -123,12 +124,12 @@
   <div id="depotInfo"></div>
   <div id="fleetList"></div>
 
-  <h3>Data &amp; Supabase (next step)</h3>
-  <p class="hint">v1 data storage: <strong>browser localStorage on this device only</strong> — different team members will NOT see each other's changes yet.
-  Shared live data needs the Supabase step: paste the project URL + anon key into <code>config.js</code> (placeholders are marked there) and wire the data layer to Supabase — see README.md.</p>
+  <h3>Data &amp; Supabase (shared team database)</h3>
+  <p class="hint">v2 data storage: <strong>Supabase shared database</strong> — the whole team works on the same live data (customers, fleet, dispatch points, settings and routes, kept in one shared record). Every change saves to Supabase automatically; this browser keeps a <strong>localStorage copy only as an offline cache</strong>. If Supabase can't be reached, the header shows <em>“Offline copy — changes not shared yet”</em> and changes stay on this device until you're back online.
+  Pilot security note: anyone who has the app link and the public publishable key can read/write this one shared table — fine for an internal pilot; add user logins before any wider rollout. The Supabase <strong>secret key is never</strong> used in this app.</p>
 </details>
 
-<footer>Standalone Route Planner v1 · 100% free · Data stored locally in this browser · Full Picture = everything on one screen for a single top-to-bottom screenshot</footer>
+<footer>Standalone Route Planner v2 · 100% free · Data shared via Supabase (local offline cache in this browser) · Full Picture = everything on one screen for a single top-to-bottom screenshot</footer>
 
 <script src="config.js"></script>
 <script src="app.js"></script>
