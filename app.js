@@ -984,6 +984,46 @@ function serveOnly(n){
   }
   save(); render();
 }
+function bulkEntries(){
+  const raw = ($("#bulkNames") ? $("#bulkNames").value : "") || "";
+  return raw.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+}
+function bulkMatchSet(){
+  const entries = bulkEntries();
+  const names = new Set(entries.map(s=>s.toLowerCase()));
+  const ids = new Set(entries.map(s=>s.replace(/\D/g,"")).filter(s=>s.length>0));
+  const matched = new Set();
+  state.customers.forEach(c=>{
+    const phoneDigits = String(c.phone||"").replace(/\D/g,"");
+    if (names.has(String(c.name).trim().toLowerCase()) || names.has(String(c.id)) ||
+        (phoneDigits && ids.has(phoneDigits)) || ids.has(String(c.id)))
+      matched.add(c.id);
+  });
+  return { entries, matched };
+}
+function bulkServeOnly(){
+  const { entries, matched } = bulkMatchSet();
+  if (!entries.length){ $("#bulkResult").textContent = "Paste some names first."; return; }
+  state.customers.forEach(c=> c.serveThisWeek = matched.has(c.id));
+  save(); render();
+  $("#bulkResult").textContent = `Matched ${matched.size} customers from ${entries.length} pasted lines — only those are serving this week.`;
+}
+function bulkSkip(){
+  const { entries, matched } = bulkMatchSet();
+  if (!entries.length){ $("#bulkResult").textContent = "Paste some names first."; return; }
+  state.customers.forEach(c=>{ if (matched.has(c.id)) c.serveThisWeek = false; });
+  save(); render();
+  $("#bulkResult").textContent = `Skipped ${matched.size} customers from ${entries.length} pasted lines.`;
+}
+function tickShown(val){
+  const q = ($("#custSearch").value||"").toLowerCase(), af = $("#custAreaFilter").value||"";
+  let n = 0;
+  state.customers.forEach(c=>{
+    if ((!af || c.area===af) && (!q || (c.name+" "+c.area+" "+c.address).toLowerCase().includes(q))){ c.serveThisWeek = val; n++; }
+  });
+  save(); render();
+  return n;
+}
 function csvCell(v){ v = String(v ?? ""); return /[",\n]/.test(v) ? `"${v.replaceAll('"','""')}"` : v; }
 function exportCsv(){
   const head = ["id","name","area","address","lat","lng","bottlesPerDrop","deliveryDays","phone","serveThisWeek","notes"];
@@ -1069,6 +1109,10 @@ function wire(){
   };
   $("#custSearch").oninput = renderCustomerList;
   $("#custAreaFilter").onchange = renderCustomerList;
+  const bso = $("#bulkServeOnlyBtn"); if (bso) bso.onclick = bulkServeOnly;
+  const bsk = $("#bulkSkipBtn"); if (bsk) bsk.onclick = bulkSkip;
+  const tsh = $("#tickShownBtn"); if (tsh) tsh.onclick = ()=> tickShown(true);
+  const ush = $("#untickShownBtn"); if (ush) ush.onclick = ()=> tickShown(false);
   $("#routeSearch").oninput = render;
   $("#routeAreaFilter").onchange = render;
   $("#fullPicBtn").onclick = ()=>{

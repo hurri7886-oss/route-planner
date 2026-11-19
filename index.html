@@ -80,11 +80,25 @@
     </span>
   </div>
   <div class="chips" id="areaChips"></div>
+  <div class="bulkbox">
+    <p><strong>📋 Bulk select — paste a list</strong> (one name per line, or phone numbers). No need to tick one by one.</p>
+    <textarea id="bulkNames" rows="3" placeholder="Paste customer names here — e.g. this week's orders list from WhatsApp/Excel"></textarea>
+    <div class="row wrap">
+      <button class="btn teal" id="bulkServeOnlyBtn">✓ Serve ONLY these</button>
+      <button class="btn ghost" id="bulkSkipBtn">✗ Skip these</button>
+      <span class="hint" id="bulkResult"></span>
+    </div>
+  </div>
   <p class="hint">After changing this list, tap <strong>Plan Routes</strong> at the top — routes are rebuilt for only the ticked customers. Fewer customers = fewer trucks needed that week.</p>
   <div id="customerListWrap" hidden>
     <div class="row wrap">
       <input type="search" id="custSearch" placeholder="Search name, area, address…">
       <select id="custAreaFilter"></select>
+    </div>
+    <div class="row wrap">
+      <button class="btn small teal" id="tickShownBtn">✓ Tick all shown</button>
+      <button class="btn small ghost" id="untickShownBtn">✗ Untick all shown</button>
+      <span class="hint">Applies to the customers matching the search/area above.</span>
     </div>
     <div id="customerList" class="customer-list"></div>
   </div>

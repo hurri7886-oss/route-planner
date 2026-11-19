@@ -34,6 +34,8 @@ body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;b
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
 .chip{background:#f4f9fc;border:1px solid #dbe5ee;border-radius:999px;padding:5px 8px 5px 12px;font-size:13px;display:flex;gap:6px;align-items:center}
 .hint{color:#7a8fa3;font-size:12px}
+.bulkbox{border:1px dashed #9fc6de;background:#f4f9fc;border-radius:10px;padding:10px 12px;margin:10px 0}
+.bulkbox textarea{width:100%;box-sizing:border-box;padding:8px;border:1px solid #c8d6e2;border-radius:8px;font:inherit;font-size:13px;resize:vertical}
 .customer-list{max-height:320px;overflow:auto;border:1px solid #e1ebf2;border-radius:10px;padding:6px}
 .customer-list label{display:flex;gap:8px;align-items:center;padding:5px 8px;border-bottom:1px solid #f0f4f8;font-size:13px;cursor:pointer}
 .customer-list label span{color:#7a8fa3}
