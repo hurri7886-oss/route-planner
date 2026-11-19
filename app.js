@@ -1084,6 +1084,52 @@ function parseCsv(text){
   if (cur !== "" || row.length){ row.push(cur); rows.push(row); }
   return rows;
 }
+/* ---------- geocoding (free, OpenStreetMap data) ----------
+   Photon first (fast, no key), Nominatim as fallback. Queries are biased
+   to Lahore with a bounding box. Used by Add Customer, CSV import and the
+   "fill missing coordinates" sweep. */
+async function geocodeAddress(address, area){
+  const q = [address, area, "Lahore", "Pakistan"].filter(Boolean).join(", ");
+  try {
+    const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&bbox=74.05,31.25,74.65,31.75`);
+    if (r.ok){
+      const j = await r.json();
+      const f = j && j.features && j.features[0];
+      if (f && f.geometry && f.geometry.coordinates)
+        return { lng: +f.geometry.coordinates[0], lat: +f.geometry.coordinates[1] };
+    }
+  } catch(e){ /* fall through to Nominatim */ }
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=pk&q=${encodeURIComponent(q)}`);
+    if (r.ok){
+      const j = await r.json();
+      if (j && j[0]) return { lat: +j[0].lat, lng: +j[0].lon };
+    }
+  } catch(e){ /* no result */ }
+  return null;
+}
+const sleep = ms => new Promise(res=> setTimeout(res, ms));
+function areaCentre(area){
+  const list = state.customers.filter(c=> c.area===area && c.lat && c.lng);
+  if (!list.length) return null;
+  return { lat: list.reduce((s,c)=>s+c.lat,0)/list.length, lng: list.reduce((s,c)=>s+c.lng,0)/list.length };
+}
+async function geocodeMissing(list, progress){
+  let exact = 0, approx = 0, failed = 0;
+  for (let i = 0; i < list.length; i++){
+    const c = list[i];
+    if (progress) progress(i+1, list.length, c);
+    const hit = c.address ? await geocodeAddress(c.address, c.area) : null;
+    if (hit){ c.lat = Math.round(hit.lat*1e6)/1e6; c.lng = Math.round(hit.lng*1e6)/1e6; exact++; }
+    else {
+      const ctr = areaCentre(c.area);
+      if (ctr){ c.lat = Math.round(ctr.lat*1e6)/1e6; c.lng = Math.round(ctr.lng*1e6)/1e6; approx++; }
+      else failed++;
+    }
+    if (i < list.length-1) await sleep(300); // be polite to the free service
+  }
+  return { exact, approx, failed };
+}
 function importCsv(file){
   file.text().then(text=>{
     const rows = parseCsv(text); if (rows.length < 2) return alert("No data rows found in that CSV.");
@@ -1102,7 +1148,16 @@ function importCsv(file){
       const ex = custById(rec.id);
       if (ex){ Object.assign(ex, rec); updated++; } else { state.customers.push(rec); added++; }
     }
-    save(); render(); alert(`Import done: ${added} added, ${updated} updated. Tap Plan Routes to rebuild.`);
+    save(); render();
+    const missing = state.customers.filter(c=> !(c.lat && c.lng) || (c.lat===0 && c.lng===0));
+    if (missing.length){
+      if (confirm(`Import done: ${added} added, ${updated} updated.\n\n${missing.length} customers have no coordinates. Look them up from their addresses now? (free, takes ~1 second each)`)){
+        geocodeMissing(missing).then(({exact, approx, failed})=>{
+          save(); render();
+          alert(`Coordinates: ${exact} found exactly, ${approx} placed at their area centre (approximate — drag or edit later), ${failed} not found.\n\nTap Plan Routes to rebuild.`);
+        });
+      } else alert("Import done. You can fill coordinates later in ⚙ Advanced → Fill missing coordinates.");
+    } else alert(`Import done: ${added} added, ${updated} updated. Tap Plan Routes to rebuild.`);
   });
 }
 
@@ -1163,13 +1218,47 @@ function wire(){
   $("#exportJsonBtn").onclick = ()=> download(JSON.stringify(state, null, 2), "route-planner-backup.json", "application/json");
   $("#importCsvInput").onchange = e=>{ if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ""; };
   $("#resetBtn").onclick = async ()=>{ if (confirm("Reset the SHARED team data to the original 500-customer seed? This replaces everyone's data.")){ localStorage.removeItem(LS_KEY); await seed(); render(); } };
-  $("#addCustForm").onsubmit = e=>{
+  const geoBtn = $("#geocodeBtn");
+  if (geoBtn) geoBtn.onclick = async ()=>{
+    const form = document.getElementById("addCustForm");
+    const addr = form.querySelector('[name="address"]').value, area = form.querySelector('[name="area"]').value;
+    if (!addr){ alert("Type the address first, then tap 📍."); return; }
+    geoBtn.textContent = "📍 Looking up…";
+    const hit = await geocodeAddress(addr, area);
+    geoBtn.textContent = "📍 Find coordinates from address";
+    if (hit){
+      form.querySelector('[name="lat"]').value = Math.round(hit.lat*1e6)/1e6;
+      form.querySelector('[name="lng"]').value = Math.round(hit.lng*1e6)/1e6;
+    } else alert("No location found for that address. Check the spelling, or enter latitude/longitude manually.");
+  };
+  const gmBtn = $("#geocodeMissingBtn");
+  if (gmBtn) gmBtn.onclick = async ()=>{
+    const missing = state.customers.filter(c=> !(c.lat && c.lng) || (c.lat===0 && c.lng===0));
+    if (!missing.length){ alert("Every customer already has coordinates. 👍"); return; }
+    gmBtn.textContent = `📍 Looking up 0/${missing.length}…`;
+    const res = await geocodeMissing(missing, (i,n)=>{ gmBtn.textContent = `📍 Looking up ${i}/${n}…`; });
+    gmBtn.textContent = "📍 Fill missing coordinates from addresses";
+    save(); render();
+    alert(`Coordinates: ${res.exact} found exactly, ${res.approx} placed at their area centre (approximate), ${res.failed} not found.`);
+  };
+  $("#addCustForm").onsubmit = async e=>{
     e.preventDefault();
     const f = new FormData(e.target);
+    let lat = +f.get("lat"), lng = +f.get("lng");
+    if (!(lat && lng)){
+      const hit = await geocodeAddress(f.get("address"), f.get("area"));
+      if (hit){ lat = Math.round(hit.lat*1e6)/1e6; lng = Math.round(hit.lng*1e6)/1e6; }
+      else {
+        const ctr = areaCentre(f.get("area"));
+        if (ctr){ lat = Math.round(ctr.lat*1e6)/1e6; lng = Math.round(ctr.lng*1e6)/1e6;
+          alert("Address not found exactly — placed at the centre of its area (approximate). You can fine-tune later."); }
+        else { alert("Could not find coordinates for that address. Please enter latitude/longitude manually."); return; }
+      }
+    }
     state.customers.push({
       id: Math.max(0, ...state.customers.map(c=>c.id)) + 1,
       name: f.get("name"), area: f.get("area"), address: f.get("address"),
-      lat: +f.get("lat"), lng: +f.get("lng"), bottlesPerDrop: +f.get("bottlesPerDrop"),
+      lat, lng, bottlesPerDrop: +f.get("bottlesPerDrop"),
       deliveryDays: f.get("deliveryDays"), phone: f.get("phone") || "", serveThisWeek: true,
       dispatchId: (state.depots.find(dp=>dp.area === f.get("area"))?.id) || state.depots[0].id,
     });

@@ -149,6 +149,7 @@
     <label class="btn ghost filelabel">⬆ Import customers CSV
       <input type="file" id="importCsvInput" accept=".csv,text/csv" hidden>
     </label>
+    <button class="btn ghost" id="geocodeMissingBtn">📍 Fill missing coordinates from addresses</button>
     <button class="btn ghost danger" id="resetBtn">Reset to seed data (500 customers)</button>
   </div>
   <p class="hint">CSV columns: id,name,area,address,lat,lng,bottlesPerDrop,deliveryDays,phone,serveThisWeek,notes. Import replaces matching ids and adds new rows.</p>
@@ -158,13 +159,15 @@
     <input required name="name" placeholder="Customer name">
     <input required name="area" placeholder="Area (e.g. DHA / Cantt)" list="areaList"><datalist id="areaList"></datalist>
     <input required name="address" placeholder="Address">
-    <input required name="lat" type="number" step="any" placeholder="Latitude">
-    <input required name="lng" type="number" step="any" placeholder="Longitude">
+    <input name="lat" type="number" step="any" placeholder="Latitude (or use 📍)">
+    <input name="lng" type="number" step="any" placeholder="Longitude (or use 📍)">
     <input required name="bottlesPerDrop" type="number" min="1" value="2" placeholder="Bottles">
     <input required name="deliveryDays" placeholder="Days: Mon,Thu" value="Mon,Thu">
     <input name="phone" placeholder="Phone (optional)">
+    <button class="btn ghost" type="button" id="geocodeBtn">📍 Find coordinates from address</button>
     <button class="btn primary" type="submit">Add customer</button>
   </form>
+  <p class="hint">No coordinates? Type the address and tap <strong>📍 Find coordinates</strong> — or just press Add customer and it looks them up automatically. Free lookup (OpenStreetMap data), biased to Lahore.</p>
   <p class="hint">New monthly accounts: add them here, tick them in This Week, then use a route's detail panel to move them onto the best route — or just re-run Plan Routes.</p>
 
   <h3>Dispatch points (5) &amp; fleet (71 vehicles)</h3>
