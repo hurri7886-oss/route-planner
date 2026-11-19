@@ -642,6 +642,7 @@ function render(){
     return `<div class="stop"><span class="sp"><strong>${dep.name}</strong> (${dep.type}) — ${dep.area} · ${nc} customers · ${nv} vehicles<br>
       <small>${dep.address}</small></span>
       <input data-dep-name="${dep.id}" value="${dep.name}" aria-label="Dispatch point name">
+      <input data-dep-address="${dep.id}" value="${dep.address || ""}" placeholder="Full street address" aria-label="Dispatch point address" style="width:220px">
       <input data-dep-lat="${dep.id}" type="number" step="any" value="${dep.lat}" aria-label="Latitude" style="width:100px">
       <input data-dep-lng="${dep.id}" type="number" step="any" value="${dep.lng}" aria-label="Longitude" style="width:100px">
       <button class="btn small primary" data-dep-save="${dep.id}">Save</button></div>`;
@@ -649,6 +650,7 @@ function render(){
   document.querySelectorAll("[data-dep-save]").forEach(b=> b.onclick = ()=>{
     const dep = depotById(b.dataset.depSave); if (!dep) return;
     dep.name = document.querySelector(`[data-dep-name="${dep.id}"]`).value || dep.name;
+    const addrEl = document.querySelector(`[data-dep-address="${dep.id}"]`); if (addrEl) dep.address = addrEl.value.trim();
     dep.lat = +document.querySelector(`[data-dep-lat="${dep.id}"]`).value || dep.lat;
     dep.lng = +document.querySelector(`[data-dep-lng="${dep.id}"]`).value || dep.lng;
     state.routes.forEach(recalcRoute); save(); render(); alert("Dispatch point saved. Re-run Plan Routes to rebuild from the new location.");
@@ -762,6 +764,14 @@ function renameDepot(depId, name){
   save(); render();
   return true;
 }
+function updateDepotDetails(depId, name, address){
+  const dep = depotById(depId); if (!dep) return false;
+  name = String(name == null ? "" : name).trim();
+  if (name) dep.name = name;
+  dep.address = String(address == null ? "" : address).trim();
+  save(); render();
+  return true;
+}
 function buildDepotPopup(dep){
   const el = document.createElement("div");
   el.className = "depot-pop";
@@ -769,6 +779,7 @@ function buildDepotPopup(dep){
     (dep.address ? `<br><small>${dep.address}</small>` : "") +
     `<br><small>Drag this pin to move the dispatch point.</small>` +
     `<div class="dp-edit"><label>Rename <input class="dp-name-input" value="${dep.name}" aria-label="Dispatch point name"></label>` +
+    `<label>Address <input class="dp-addr-input" value="${dep.address || ""}" placeholder="Full street address" aria-label="Dispatch point address"></label>` +
     `<button type="button" class="btn small primary dp-save">Save</button></div>`;
   return el;
 }
@@ -826,7 +837,7 @@ function renderMap(dr){
 function drawLeaflet(dr){
   const sig = JSON.stringify([selectedDay, selectedRouteId, mapFocus,
     dr.map(r=>r.id+":"+r.stopIds.join(",")),
-    (state.depots||[]).map(d=>d.id+":"+d.name+":"+d.lat+","+d.lng),
+    (state.depots||[]).map(d=>d.id+":"+d.name+":"+d.address+":"+d.lat+","+d.lng),
     unassignedList(selectedDay)]);
   if (sig === lastMapSig){ if (lmap) lmap.invalidateSize(); return; }
   lastMapSig = sig;
@@ -841,7 +852,8 @@ function drawLeaflet(dr){
     mk.on("popupopen", ()=>{
       const btn = popEl.querySelector(".dp-save");
       const input = popEl.querySelector(".dp-name-input");
-      if (btn) btn.onclick = ()=>{ renameDepot(dep.id, input ? input.value : ""); };
+      const addr = popEl.querySelector(".dp-addr-input");
+      if (btn) btn.onclick = ()=>{ updateDepotDetails(dep.id, input ? input.value : "", addr ? addr.value : ""); };
     });
     mk.on("dragend", ()=>{
       const ll = mk.getLatLng();
