@@ -1251,6 +1251,20 @@ async function loadChangeHistory(){
 }
 
 /* ---------- login activity (IP logging) ---------- */
+function getPosition(){
+  return new Promise(resolve=>{
+    if (!navigator.geolocation) return resolve(null);
+    let done = false;
+    const finish = v => { if (!done){ done = true; resolve(v); } };
+    try {
+      navigator.geolocation.getCurrentPosition(
+        pos => finish({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy || 0) }),
+        ()=> finish(null),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+    } catch(e){ finish(null); }
+    setTimeout(()=> finish(null), 12000); // permission prompt ignored -> log without GPS
+  });
+}
 async function logLogin(){
   if (!SB || !session || !session.email) return;
   try { if (sessionStorage.getItem("rp_login_logged") === session.email) return; } catch(e){}
@@ -1259,12 +1273,23 @@ async function logLogin(){
     const r = await fetch("https://api.ipify.org?format=json");
     if (r.ok) ip = (await r.json()).ip || "";
   } catch(e){ /* IP lookup is best-effort */ }
+  const pos = await getPosition(); // browser asks the user "Allow location?" — their choice
+  const base = { user_email: session.email, ip, user_agent: navigator.userAgent || "" };
   try {
-    await sbFetch(`/rest/v1/app_logins`, {
-      method: "POST",
-      headers: { "Prefer": "return=minimal" },
-      body: JSON.stringify({ user_email: session.email, ip, user_agent: navigator.userAgent || "" }),
-    });
+    let res = null;
+    if (pos){
+      res = await sbFetch(`/rest/v1/app_logins`, {
+        method: "POST", headers: { "Prefer": "return=minimal" },
+        body: JSON.stringify({ ...base, lat: pos.lat, lng: pos.lng, accuracy_m: pos.acc }),
+      });
+    }
+    if (!pos || !res || !res.ok){
+      // GPS columns may not exist yet (setup SQL pending) — record without them
+      await sbFetch(`/rest/v1/app_logins`, {
+        method: "POST", headers: { "Prefer": "return=minimal" },
+        body: JSON.stringify(base),
+      });
+    }
     try { sessionStorage.setItem("rp_login_logged", session.email); } catch(e){}
   } catch(e){ /* table may not exist until the setup SQL is run */ }
 }
