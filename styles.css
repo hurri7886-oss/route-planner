@@ -140,3 +140,7 @@ body.fullpic .detail .stop:nth-of-type(n+6){display:none}
   .stops-grid{grid-template-columns:1fr}
   .addform{grid-template-columns:1fr}
 }
+
+/* Nestlé logo in header + login */
+.nestle-logo{height:30px;width:auto;margin-left:12px;align-self:center}
+.login-nestle{height:26px;margin:2px auto 4px;display:block}
