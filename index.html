@@ -150,11 +150,8 @@
   </div>
   <div id="changeHistory"><p class="hint">Tap Refresh to load the latest changes.</p></div>
 
-  <h3>Data, logins &amp; Supabase (shared team database)</h3>
-  <p class="hint">v3 data storage: <strong>Supabase shared database with team logins</strong>. Everyone signs in with their own email + password — accounts are created by the admin in the Supabase dashboard (<strong>Authentication → Users → Add user</strong>); there is <strong>no public sign-up</strong>, and the admin should keep public sign-ups <strong>turned OFF</strong> (Authentication → Settings). The database only answers signed-in users, so the data is never visible without a login. Every save is stamped with the signed-in user's email (the header shows <em>“Last saved by …”</em>) and written into the <strong>Change history</strong> above — the team can always see who changed what, and when. The whole team works on the same live data (customers, fleet, dispatch points, settings and routes, kept in one shared record); this browser keeps a <strong>localStorage copy only as an offline backup</strong>. If Supabase can't be reached, the header shows <em>“Offline copy — changes not shared yet”</em> and changes stay on this device until you're back online. The Supabase <strong>secret key is never</strong> used in this app.</p>
 </details>
 
-<footer>Standalone Route Planner v3 · 100% free · Team logins required · Data shared via Supabase (local offline backup in this browser) · Full Picture = everything on one screen for a single top-to-bottom screenshot</footer>
 </div>
 
 <script src="config.js"></script>
