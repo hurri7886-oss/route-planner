@@ -271,10 +271,29 @@ function planRoutes(){
   if (!serving.length || !state.vehicles.length){ state.routes = []; save(); render(); return; }
   const routes = [];
   let rid = 1;
-  // Plan per dispatch point: customers and vehicles homed at that point,
-  // routes start and end at that dispatch point.
+  // Assign every customer to their NEAREST dispatch point that has vehicles
+  // (straight-line distance). If that point's fleet is already full
+  // (fleet x per-truck x 1.25), overflow to the next nearest. Vehicles stay
+  // homed at their own dispatch point; routes start and end there.
+  const fleetDeps = state.depots.filter(d => state.vehicles.some(v=>v.dispatchId===d.id));
+  const assign = new Map(), depLoad = {};
+  fleetDeps.forEach(d => depLoad[d.id] = 0);
+  const byNearest = serving.slice().sort((a,b)=>{
+    const da = Math.min(...fleetDeps.map(d=>hav(a,d))), db = Math.min(...fleetDeps.map(d=>hav(b,d)));
+    return da - db;
+  });
+  for (const c of byNearest){
+    const ranked = fleetDeps.slice().sort((x,y)=> hav(c,x) - hav(c,y));
+    let chosen = ranked[0];
+    for (const d of ranked){
+      const cap = state.vehicles.filter(v=>v.dispatchId===d.id).length * state.perTruck * 1.25;
+      if (depLoad[d.id] < cap){ chosen = d; break; }
+    }
+    assign.set(c.id, chosen.id); depLoad[chosen.id]++;
+  }
+  // Plan per dispatch point from the nearest-point assignment.
   for (const dep of state.depots){
-    const base0 = serving.filter(c => (c.dispatchId || "dp1") === dep.id);
+    const base0 = serving.filter(c => assign.get(c.id) === dep.id);
     if (!base0.length) continue;
     const fleet = state.vehicles.filter(v => v.dispatchId === dep.id);
     if (!fleet.length) continue;
