@@ -1133,6 +1133,13 @@ function areaCentre(area){
   if (!list.length) return null;
   return { lat: list.reduce((s,c)=>s+c.lat,0)/list.length, lng: list.reduce((s,c)=>s+c.lng,0)/list.length };
 }
+function depotCentreFor(c){
+  const deps = state.depots || [];
+  const dep = deps.find(d=> d.area === c.area) ||
+              deps.find(d=> (d.area||"").split(" / ")[0] === String(c.area||"").split(" / ")[0]) ||
+              deps.find(d=> d.id === c.dispatchId);
+  return dep ? { lat: dep.lat, lng: dep.lng } : null;
+}
 async function geocodeMissing(list, progress){
   let exact = 0, approx = 0, failed = 0;
   for (let i = 0; i < list.length; i++){
@@ -1141,7 +1148,7 @@ async function geocodeMissing(list, progress){
     const hit = c.address ? await geocodeAddress(c.address, c.area) : null;
     if (hit){ c.lat = Math.round(hit.lat*1e6)/1e6; c.lng = Math.round(hit.lng*1e6)/1e6; exact++; }
     else {
-      const ctr = areaCentre(c.area);
+      const ctr = areaCentre(c.area) || depotCentreFor(c);
       if (ctr){ c.lat = Math.round(ctr.lat*1e6)/1e6; c.lng = Math.round(ctr.lng*1e6)/1e6; approx++; }
       else failed++;
     }
@@ -1386,7 +1393,7 @@ function wire(){
       const hit = await geocodeAddress(f.get("address"), f.get("area"));
       if (hit){ lat = Math.round(hit.lat*1e6)/1e6; lng = Math.round(hit.lng*1e6)/1e6; }
       else {
-        const ctr = areaCentre(f.get("area"));
+        const ctr = areaCentre(f.get("area")) || depotCentreFor({ area: f.get("area") });
         if (ctr){ lat = Math.round(ctr.lat*1e6)/1e6; lng = Math.round(ctr.lng*1e6)/1e6;
           alert("Address not found exactly — placed at the centre of its area (approximate). You can fine-tune later."); }
         else { alert("Could not find coordinates for that address. Please enter latitude/longitude manually."); return; }
