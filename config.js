@@ -1,9 +1,16 @@
 // ============================================================
-// SUPABASE CONFIG — CONNECTED (v2 shared team database)
+// SUPABASE CONFIG — CONNECTED (v3: shared database + logins)
 // The app stores its whole state in one row of the public
 // .app_state table in this Supabase project, so every team
 // member sees and edits the SAME live data. localStorage on
 // each device is kept only as an offline cache.
+//
+// v3: team members must SIGN IN (Supabase Auth; accounts are
+// made by the admin in the dashboard — no public sign-up).
+// Data calls carry the signed-in user's token, and the
+// app_state / app_changes RLS policies only allow the
+// 'authenticated' role, so the publishable key alone can
+// no longer read or write data.
 //
 // The key below is the project's PUBLISHABLE (anon/public)
 // key. It is public by design — safe to embed in browser

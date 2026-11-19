@@ -1,4 +1,4 @@
-# Route Planner — Standalone v2 (Option 2)
+# Route Planner — Standalone v3 (Option 2)
 
 A dependency-free static web app (plain HTML/CSS/JS, no build step, no paid
 maps, no API keys) for the Nestlé Waters Lahore 19L home & business delivery
@@ -29,7 +29,22 @@ by the user (2026-11-19), **not** the earlier sample assumptions
   10–200, quick choices 50/75/90/120). The team changes this daily on the
   main screen; no developer/Muse visit is needed.
 
-## Features (v2)
+## Features (v3)
+
+- **Team logins (Supabase Auth)** — the app opens on a login screen and
+  loads **no data** until a team member signs in with their own email +
+  password. Accounts are created by the admin only (Supabase dashboard →
+  Authentication → Users → Add user); there is **no public sign-up** in
+  the app, and public sign-ups should be turned OFF in Supabase
+  (Authentication → Settings). The header shows the signed-in email and
+  a **Sign out** button; an expired session returns the user to the
+  login screen with a note.
+- **Accountability** — every save is stamped with the saver's email
+  (`app_state.updated_by`; the header shows *“Last saved by …”*) and a
+  plain-words summary is logged to `public.app_changes`
+  (e.g. “Customers per truck 90 → 75”, “Routes replanned (28 routes)”).
+  ⚙ Advanced has a **Change history — who changed what** section
+  (latest 30 entries, PKT times) with a refresh button.
 
 - Locus-style dispatch console (layout pattern only): day selector Mon–Sat,
   one **Plan Routes** button, KPI strip (routes, customers served, km,
@@ -53,37 +68,64 @@ by the user (2026-11-19), **not** the earlier sample assumptions
 - CSV import/export of customers, JSON full backup export, add-customer
   form, editable dispatch point names/locations, reset-to-seed.
 
-## Data storage — v2: Supabase shared database
+## Data storage — v3: Supabase shared database + logins
 
-v2 is wired to **Supabase** as the shared team database, so every team
-member works on the same live data:
+v3 keeps **Supabase** as the shared team database and adds **team
+logins with accountability**, so the team can always see who changed
+what:
 
+- **Login gate first.** On load, the app checks for a valid Supabase
+  Auth session (stored in localStorage, refreshed automatically via
+  the refresh token). With no valid session it shows only the login
+  screen — no data is fetched or rendered. All data calls send the
+  signed-in **user's access token** (`Authorization: Bearer …`); the
+  publishable key is still sent as the `apikey` header but no longer
+  grants data access by itself.
 - The whole app state (customers, vehicles, dispatch points, settings,
   routes) lives in **one row** of `public.app_state`
   (`id = 'route-planner'`, `state` jsonb) in the project
   `https://tcvcirrpomlrirkbgikw.supabase.co`.
-- On startup the app reads that row first. If the shared state is empty,
-  it initialises from the bundled seed files and uploads the full state.
-  If Supabase is unreachable, it falls back to the local cache/seed and
-  the header shows **“Offline copy — changes not shared yet”**; when
-  connected it shows **“Shared data: connected”**.
-- Every change is written to **localStorage immediately** (offline cache,
-  key `route-planner-v2`) and **PATCHed to Supabase** (debounced ~800 ms).
+- On startup (after login) the app reads that row first. If the shared
+  state is empty, it initialises from the bundled seed files and
+  uploads the full state. If Supabase is unreachable, it falls back to
+  the local cache/seed and the header shows **“Offline copy — changes
+  not shared yet”**; when connected it shows **“Shared data:
+  connected · Last saved by \<email\>”**.
+- Every change is written to **localStorage immediately** (device-local
+  offline backup, key `route-planner-v2`) and **PATCHed to Supabase**
+  (debounced ~800 ms) with `updated_by` set to the saver's email. Each
+  debounced save also inserts one row into **`public.app_changes`**
+  (`user_email`, `summary`) — best-effort, so a log failure never
+  blocks a save. The summary is built from a shallow diff against the
+  last loaded/saved state.
 - `config.js` holds the project URL and the **publishable (anon) key**,
   which is public by design and safe to embed in browser code. The
   Supabase **secret key must never** go in this app.
-- Table setup (run once in the Supabase SQL Editor): create
-  `public.app_state (id text primary key, state jsonb not null,
-  updated_at timestamptz not null default now())`, enable RLS, add
-  policies allowing the anon role select/insert/update, and insert the
-  row `('route-planner', '{}')`.
+- Auth uses the Supabase Auth REST API directly (no SDK):
+  `POST /auth/v1/token?grant_type=password` to sign in,
+  `grant_type=refresh_token` to refresh, `POST /auth/v1/logout` to
+  sign out.
 
-**Pilot security posture:** anyone who has the app link + the publishable
-key can read/write this one `app_state` table (the RLS policies allow the
-anon role full read/write on that table only). That is acceptable for an
-internal pilot; **add user logins (Supabase Auth) and tighten the
-policies before any wider rollout.** Keep using the JSON backup export
-as an extra safety copy.
+**Required database setup (v3 SQL, run once in the Supabase SQL
+Editor):** on `public.app_state` add an `updated_by` column; create
+`public.app_changes (id, changed_at, user_email, summary)` with RLS;
+**drop the old anon policies**; and allow **only role
+`authenticated`** to select/insert/update `app_state` and
+select/insert `app_changes`. Until that SQL is run, the previous anon
+policies still apply (the app stays compatible: it retries state
+reads/writes without `updated_by` if the column is missing, and the
+change log silently no-ops if the table is missing).
+
+**Admin checklist for accounts:** Supabase dashboard →
+Authentication → Users → **Add user** for each team member (email +
+password); Authentication → Settings → **disable public sign-ups**
+(“Allow new users to sign up” OFF). Team members cannot create their
+own accounts from the app.
+
+**Security posture (v3):** only signed-in team members can read or
+write the shared data; every save is attributed to a named user in
+`app_state.updated_by` and `public.app_changes`. Keep using the JSON
+backup export as an extra safety copy.
 
 ## Hosting / deployment
 
@@ -102,9 +144,9 @@ as an extra safety copy.
 
 | File | Purpose |
 |---|---|
-| `index.html` | App shell / all panels |
-| `styles.css` | Locus-style console styling + Full Picture mode |
-| `app.js` | All logic: seed load, planning, rendering, import/export |
+| `index.html` | App shell / all panels (incl. login screen + change history) |
+| `styles.css` | Locus-style console styling + Full Picture mode + login screen |
+| `app.js` | All logic: Supabase Auth login gate, seed load, planning, rendering, import/export, change log + history |
 | `seed1.json` + `seed2.json` | 500 customers (short keys, split in two), 71 vehicles, 5 dispatch points |
-| `config.js` | Supabase project URL + publishable key (v2 shared storage) |
+| `config.js` | Supabase project URL + publishable key (v3: shared storage + logins) |
 | `vercel.json` | Static hosting config for Vercel |

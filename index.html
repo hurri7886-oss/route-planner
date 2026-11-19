@@ -7,15 +7,36 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<section id="loginScreen" class="login-screen">
+  <form id="loginForm" class="login-card">
+    <div class="logo login-logo">▦</div>
+    <h1>Route Planner</h1>
+    <p class="login-sub">Lahore · 19L Home &amp; Business Delivery</p>
+    <p class="login-note" id="loginNote"></p>
+    <label>Email
+      <input type="email" id="loginEmail" required autocomplete="username" placeholder="you@company.com">
+    </label>
+    <label>Password
+      <input type="password" id="loginPassword" required autocomplete="current-password" placeholder="Your password">
+    </label>
+    <p class="login-error" id="loginError"></p>
+    <button class="btn primary login-btn" id="loginBtn" type="submit">Sign in</button>
+    <p class="hint">Team accounts only — accounts are created by the admin in Supabase. There is no public sign-up; ask your admin if you need access.</p>
+  </form>
+</section>
+
+<div id="appShell" hidden>
 <header class="topbar">
   <div class="brand"><div class="logo">▦</div>
-    <div><h1>Route Planner</h1><p>Lahore · 19L Home &amp; Business Delivery · Standalone v2</p>
+    <div><h1>Route Planner</h1><p>Lahore · 19L Home &amp; Business Delivery · Standalone v3</p>
     <p><span id="syncStatus" style="font-size:12px;font-weight:600">● Connecting to shared data…</span></p></div>
   </div>
   <nav class="days" id="dayTabs" aria-label="Delivery day"></nav>
   <div class="actions">
+    <span id="userEmail" class="user-email"></span>
     <button id="fullPicBtn" class="btn ghost">📸 Full Picture</button>
     <button id="planBtn" class="btn primary">Plan Routes</button>
+    <button id="signOutBtn" class="btn ghost">Sign out</button>
   </div>
 </header>
 
@@ -124,12 +145,18 @@
   <div id="depotInfo"></div>
   <div id="fleetList"></div>
 
-  <h3>Data &amp; Supabase (shared team database)</h3>
-  <p class="hint">v2 data storage: <strong>Supabase shared database</strong> — the whole team works on the same live data (customers, fleet, dispatch points, settings and routes, kept in one shared record). Every change saves to Supabase automatically; this browser keeps a <strong>localStorage copy only as an offline cache</strong>. If Supabase can't be reached, the header shows <em>“Offline copy — changes not shared yet”</em> and changes stay on this device until you're back online.
-  Pilot security note: anyone who has the app link and the public publishable key can read/write this one shared table — fine for an internal pilot; add user logins before any wider rollout. The Supabase <strong>secret key is never</strong> used in this app.</p>
+  <h3>Change history — who changed what</h3>
+  <div class="row wrap">
+    <button class="btn ghost" id="refreshHistoryBtn" type="button">↻ Refresh history</button>
+  </div>
+  <div id="changeHistory"><p class="hint">Tap Refresh to load the latest changes.</p></div>
+
+  <h3>Data, logins &amp; Supabase (shared team database)</h3>
+  <p class="hint">v3 data storage: <strong>Supabase shared database with team logins</strong>. Everyone signs in with their own email + password — accounts are created by the admin in the Supabase dashboard (<strong>Authentication → Users → Add user</strong>); there is <strong>no public sign-up</strong>, and the admin should keep public sign-ups <strong>turned OFF</strong> (Authentication → Settings). The database only answers signed-in users, so the data is never visible without a login. Every save is stamped with the signed-in user's email (the header shows <em>“Last saved by …”</em>) and written into the <strong>Change history</strong> above — the team can always see who changed what, and when. The whole team works on the same live data (customers, fleet, dispatch points, settings and routes, kept in one shared record); this browser keeps a <strong>localStorage copy only as an offline backup</strong>. If Supabase can't be reached, the header shows <em>“Offline copy — changes not shared yet”</em> and changes stay on this device until you're back online. The Supabase <strong>secret key is never</strong> used in this app.</p>
 </details>
 
-<footer>Standalone Route Planner v2 · 100% free · Data shared via Supabase (local offline cache in this browser) · Full Picture = everything on one screen for a single top-to-bottom screenshot</footer>
+<footer>Standalone Route Planner v3 · 100% free · Team logins required · Data shared via Supabase (local offline backup in this browser) · Full Picture = everything on one screen for a single top-to-bottom screenshot</footer>
+</div>
 
 <script src="config.js"></script>
 <script src="app.js"></script>

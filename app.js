@@ -1,8 +1,12 @@
 "use strict";
-/* Route Planner — standalone v2. Data: Supabase shared table
-   (public.app_state, one row id='route-planner') is the team database;
-   localStorage on this device is only an offline cache.
-   Config in config.js (publishable key — public-safe by design). */
+/* Route Planner — standalone v3. Team LOGINS required (Supabase Auth):
+   nothing loads until a team member signs in with their own email +
+   password. Data: Supabase shared table (public.app_state, one row
+   id='route-planner') is the team database, readable/writable ONLY by
+   signed-in users; every save is stamped with the user's email and
+   logged to public.app_changes. localStorage on this device is only
+   an offline cache / backup. Config in config.js (publishable key —
+   public-safe by design; access is controlled by login + RLS). */
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat"];
 const COLORS = ["#0b84c6","#e53935","#009688","#fb8c00","#8e24aa","#3949ab","#00897b","#d81b60"];
 const LS_KEY = "route-planner-v2"; // v2: multi-dispatch + real fleet (71 vehicles)
@@ -23,44 +27,177 @@ function load(){
   return false;
 }
 
-/* ---------- Supabase shared storage ----------
+/* ---------- Supabase shared storage (signed-in users only) ----------
    Whole app state lives in one row: public.app_state, id='route-planner'.
-   Startup: Supabase first; empty shared state -> seed + upload; unreachable
-   -> localStorage/seed fallback with an "Offline copy" note in the header.
-   Every save(): localStorage immediately + debounced PATCH to Supabase. */
+   Startup: login gate first; then Supabase (with the user's token);
+   empty shared state -> seed + upload; unreachable -> localStorage/seed
+   fallback with an "Offline copy" note in the header. Every save():
+   localStorage immediately + debounced PATCH to Supabase, stamped with
+   the user's email and summarised into public.app_changes. */
 const SB = (typeof window !== "undefined" && window.RP_CONFIG && window.RP_CONFIG.SUPABASE_URL && window.RP_CONFIG.SUPABASE_ANON_KEY)
   ? { url: window.RP_CONFIG.SUPABASE_URL.replace(/\/+$/, ""), key: window.RP_CONFIG.SUPABASE_ANON_KEY } : null;
 let sbConnected = false;
 let sbTimer = null;
-function sbHeaders(){ return { apikey: SB.key, Authorization: "Bearer " + SB.key, "Content-Type": "application/json" }; }
+
+/* ---------- Auth (Supabase Auth REST directly, no SDK) ----------
+   Accounts are created by the admin in the Supabase dashboard ONLY —
+   there is no sign-up in this app. The session (access + refresh
+   token, email, expiry) is kept in localStorage; data calls send the
+   USER's access token, so the database only answers signed-in users. */
+const AUTH_KEY = "route-planner-auth-v1";
+let session = null; // {access_token, refresh_token, email, expires_at}
+function loadSession(){
+  try { const raw = localStorage.getItem(AUTH_KEY); if (raw){ session = JSON.parse(raw); return session; } } catch(e){}
+  session = null; return null;
+}
+function storeSession(s){
+  session = s;
+  try { if (s) localStorage.setItem(AUTH_KEY, JSON.stringify(s)); else localStorage.removeItem(AUTH_KEY); } catch(e){}
+}
+function sessionFromAuthResponse(j){
+  return { access_token: j.access_token, refresh_token: j.refresh_token,
+           email: (j.user && j.user.email) || (session && session.email) || "",
+           expires_at: Date.now() + ((+j.expires_in || 3600) * 1000) };
+}
+async function authTokenRequest(grant, body){
+  const res = await fetch(`${SB.url}/auth/v1/token?grant_type=${grant}`, {
+    method: "POST",
+    headers: { apikey: SB.key, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const j = await res.json().catch(()=>({}));
+  if (!res.ok){
+    const err = new Error(j.msg || j.error_description || ("Sign-in failed (" + res.status + ")"));
+    err.code = j.error_code || j.error || "";
+    throw err;
+  }
+  return sessionFromAuthResponse(j);
+}
+async function authLogin(email, password){
+  storeSession(await authTokenRequest("password", { email, password }));
+  return session;
+}
+async function authRefresh(){
+  if (!session || !session.refresh_token){ storeSession(null); return null; }
+  try { storeSession(await authTokenRequest("refresh_token", { refresh_token: session.refresh_token })); return session; }
+  catch(e){ storeSession(null); return null; } // dead refresh token -> clear the stale session
+}
+async function ensureSession(){
+  loadSession();
+  if (!session) return null;
+  if (session.expires_at && session.expires_at - Date.now() > 60000) return session;
+  return await authRefresh(); // null if the refresh token is dead too
+}
+let loginNote = "";
+function expireSession(note){
+  storeSession(null);
+  state = null;
+  loginNote = note || "Your session expired — please sign in again.";
+  showLogin();
+}
+async function signOut(){
+  try {
+    if (session) await fetch(`${SB.url}/auth/v1/logout`, { method: "POST",
+      headers: { apikey: SB.key, Authorization: "Bearer " + session.access_token } });
+  } catch(e){}
+  storeSession(null);
+  location.reload(); // clean slate: back at the login gate, nothing loaded
+}
+function sbHeaders(){
+  // apikey stays the publishable key; Authorization carries the USER token.
+  return { apikey: SB.key, Authorization: "Bearer " + (session && session.access_token ? session.access_token : SB.key),
+           "Content-Type": "application/json" };
+}
+/* One fetch wrapper for all data calls: on 401, refresh the session
+   once and retry; if the refresh fails, the session is over -> gate. */
+async function sbFetch(path, opts = {}){
+  const doFetch = ()=> fetch(`${SB.url}${path}`, { ...opts, headers: { ...sbHeaders(), ...(opts.headers || {}) } });
+  let res = await doFetch();
+  if (res.status === 401 && session){
+    const s = await authRefresh();
+    if (s) res = await doFetch();
+    else { expireSession(); throw new Error("session-expired"); }
+  }
+  return res;
+}
+let lastUpdatedBy = "";   // email stamped on the shared row (app_state.updated_by)
+let lastSnapshot = null;  // deep clone of last loaded/saved state, for change-log diffs
 function updateSyncStatus(){
   const el = document.getElementById("syncStatus");
   if (!el) return;
-  el.textContent = sbConnected ? "● Shared data: connected" : "● Offline copy — changes not shared yet";
+  let txt = sbConnected ? "● Shared data: connected" : "● Offline copy — changes not shared yet";
+  if (sbConnected && lastUpdatedBy) txt += ` · Last saved by ${lastUpdatedBy}`;
+  el.textContent = txt;
   el.style.color = sbConnected ? "#7ee2a8" : "#ffb74d";
 }
 async function sbFetchState(){
-  const res = await fetch(`${SB.url}/rest/v1/app_state?id=eq.route-planner&select=state`, { headers: sbHeaders() });
+  // Prefer selecting updated_by too; if that column is not there yet
+  // (setup SQL still pending) PostgREST answers 400 — retry state-only.
+  let res = await sbFetch(`/rest/v1/app_state?id=eq.route-planner&select=state,updated_by`);
+  if (res.status === 400) res = await sbFetch(`/rest/v1/app_state?id=eq.route-planner&select=state`);
   if (!res.ok) throw new Error("Supabase GET failed: " + res.status);
   const rows = await res.json();
   if (!rows.length) return null;
+  lastUpdatedBy = rows[0].updated_by || "";
   const st = rows[0].state;
   return typeof st === "string" ? JSON.parse(st) : st;
 }
 async function sbPushState(){
-  const res = await fetch(`${SB.url}/rest/v1/app_state?id=eq.route-planner`, {
-    method: "PATCH",
-    headers: { ...sbHeaders(), Prefer: "return=minimal" },
-    body: JSON.stringify({ state, updated_at: new Date().toISOString() }),
-  });
+  const body = { state, updated_at: new Date().toISOString(), updated_by: session ? session.email : null };
+  const patch = b => sbFetch(`/rest/v1/app_state?id=eq.route-planner`, {
+    method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(b) });
+  let res = await patch(body);
+  if (res.status === 400){ // updated_by column missing (setup SQL pending) — retry without it
+    delete body.updated_by;
+    res = await patch(body);
+  }
   if (!res.ok) throw new Error("Supabase PATCH failed: " + res.status);
+  if (session) lastUpdatedBy = session.email;
+}
+/* ---------- change log (public.app_changes) ---------- */
+function cloneState(s){ return s ? JSON.parse(JSON.stringify(s)) : null; }
+function serveSig(list){ return (list || []).filter(c=>c.serveThisWeek).map(c=>c.id).sort((a,b)=>a-b).join(","); }
+function diffSummary(prev, next){
+  const p = prev || {};
+  const pc = Array.isArray(p.customers) ? p.customers : [];
+  const nc = Array.isArray(next.customers) ? next.customers : [];
+  const parts = [];
+  if (prev && (p.perTruck ?? null) !== (next.perTruck ?? null))
+    parts.push(`Customers per truck ${p.perTruck} → ${next.perTruck}`);
+  if (pc.length !== nc.length)
+    parts.push(`Customers added/removed (${pc.length} → ${nc.length})`);
+  if (serveSig(pc) !== serveSig(nc))
+    parts.push(`This Week list changed (${nc.filter(c=>c.serveThisWeek).length} serving)`);
+  const pr = Array.isArray(p.routes) ? p.routes : [];
+  const nr = Array.isArray(next.routes) ? next.routes : [];
+  if (JSON.stringify(pr) !== JSON.stringify(nr))
+    parts.push(`Routes replanned (${nr.length} routes)`);
+  if (JSON.stringify(p.vehicles || []) !== JSON.stringify(next.vehicles || []) ||
+      JSON.stringify(p.depots || []) !== JSON.stringify(next.depots || []))
+    parts.push("Fleet/dispatch points edited");
+  if (!parts.length && JSON.stringify(pc) !== JSON.stringify(nc))
+    parts.push("Customer details edited");
+  return parts.length ? parts.join("; ") : "Data updated";
+}
+async function sbLogChange(summary){
+  if (!session) return;
+  try {
+    await sbFetch(`/rest/v1/app_changes`, {
+      method: "POST", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ user_email: session.email, summary }),
+    });
+  } catch(e){ /* best effort only — a log failure must never block a save */ }
 }
 function queueSbSave(){
   if (!SB) return;
   clearTimeout(sbTimer);
   sbTimer = setTimeout(async ()=>{
+    const prev = lastSnapshot;
+    const snap = cloneState(state);
     try { await sbPushState(); sbConnected = true; }
-    catch(e){ sbConnected = false; }
+    catch(e){ sbConnected = false; updateSyncStatus(); return; }
+    try { await sbLogChange(diffSummary(prev, snap)); } catch(e){}
+    lastSnapshot = snap;
     updateSyncStatus();
   }, 800);
 }
@@ -454,9 +591,33 @@ function importCsv(file){
   });
 }
 
+/* ---------- change history view (⚙ Advanced) ---------- */
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
+async function loadChangeHistory(){
+  const el = document.getElementById("changeHistory");
+  if (!el) return;
+  if (!SB || !session){ el.innerHTML = `<p class="hint">Sign in to see the change history.</p>`; return; }
+  el.innerHTML = `<p class="hint">Loading…</p>`;
+  try {
+    const res = await sbFetch(`/rest/v1/app_changes?select=changed_at,user_email,summary&order=changed_at.desc&limit=30`);
+    if (!res.ok) throw new Error("history load failed: " + res.status);
+    const rows = await res.json();
+    if (!rows.length){ el.innerHTML = `<p class="hint">No changes logged yet — the first save after setup will appear here.</p>`; return; }
+    const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Karachi", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true });
+    el.innerHTML = rows.map(r =>
+      `<div class="stop"><span class="sp"><strong>${esc(r.user_email)}</strong> — ${esc(r.summary)}<br><small>${fmt.format(new Date(r.changed_at))} PKT</small></span></div>`).join("");
+  } catch(e){
+    el.innerHTML = `<p class="hint">Could not load the change history yet. If the history table is still being set up, this will start working once setup is complete.</p>`;
+  }
+}
+
 /* ---------- wiring ---------- */
 function wire(){
   $("#planBtn").onclick = planRoutes;
+  const soBtn = $("#signOutBtn"); if (soBtn) soBtn.onclick = signOut;
+  const rhBtn = $("#refreshHistoryBtn"); if (rhBtn) rhBtn.onclick = loadChangeHistory;
+  const adv = document.getElementById("advanced");
+  if (adv) adv.addEventListener("toggle", ()=>{ if (adv.open) loadChangeHistory(); });
   $("#perTruckSave").onclick = ()=> setPerTruck($("#perTruckInput").value);
   $("#serveAllBtn").onclick = ()=>{ state.customers.forEach(c=>c.serveThisWeek=true); save(); render(); };
   $("#skipAllBtn").onclick = ()=>{ state.customers.forEach(c=>c.serveThisWeek=false); save(); render(); };
@@ -493,7 +654,51 @@ function wire(){
     save(); e.target.reset(); render(); alert("Customer added and ticked for this week. Tap Plan Routes.");
   };
 }
-(async function init(){
+/* ---------- login gate + boot ---------- */
+function showLogin(){
+  const ls = document.getElementById("loginScreen"), shell = document.getElementById("appShell");
+  if (ls) ls.hidden = false;
+  if (shell) shell.hidden = true;
+  const n = document.getElementById("loginNote");
+  if (n) n.textContent = loginNote || "";
+  loginNote = "";
+  const err = document.getElementById("loginError");
+  if (err) err.textContent = "";
+}
+function showApp(){
+  const ls = document.getElementById("loginScreen"), shell = document.getElementById("appShell");
+  if (ls) ls.hidden = true;
+  if (shell) shell.hidden = false;
+  const ue = document.getElementById("userEmail");
+  if (ue) ue.textContent = session ? session.email : "";
+}
+function wireLogin(){
+  const form = document.getElementById("loginForm");
+  if (!form) return;
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const err = document.getElementById("loginError");
+    const btn = document.getElementById("loginBtn");
+    err.textContent = "";
+    btn.disabled = true; btn.textContent = "Signing in…";
+    try {
+      await authLogin(document.getElementById("loginEmail").value.trim(),
+                      document.getElementById("loginPassword").value);
+      showApp();
+      await boot();
+    } catch(ex){
+      const wrong = (ex && ex.code === "invalid_credentials") || /invalid login/i.test((ex && ex.message) || "");
+      err.textContent = wrong ? "Wrong email or password. Please check and try again."
+                              : "Sign-in failed: " + ((ex && ex.message) || "please try again.");
+    } finally {
+      btn.disabled = false; btn.textContent = "Sign in";
+    }
+  };
+}
+let booted = false;
+async function boot(){
+  if (booted) return;
+  booted = true;
   let fromShared = false;
   if (SB){
     try {
@@ -501,15 +706,28 @@ function wire(){
       sbConnected = true;
       if (st && Array.isArray(st.customers) && st.customers.length){
         state = st;               // shared team data wins
+        lastSnapshot = cloneState(st);
         cacheLocal();             // refresh the offline cache (no re-upload)
       } else {
         await seed();             // shared state empty -> seed; save() uploads it
       }
       fromShared = true;
-    } catch(e){ sbConnected = false; }  // unreachable -> offline fallback below
+    } catch(e){
+      if (e && e.message === "session-expired") return; // gate is already showing
+      sbConnected = false;        // unreachable -> offline fallback below
+    }
   }
   if (!fromShared && !load()) await seed();
+  if (!state) return;
   if (!state.perTruck) state.perTruck = 90;
   if (!Array.isArray(state.depots) || !state.depots.length){ localStorage.removeItem(LS_KEY); await seed(); }
   wire(); render(); updateSyncStatus();
+}
+(async function init(){
+  wireLogin();
+  if (!SB){ showApp(); await boot(); return; }  // no backend configured: offline-only mode
+  const s = await ensureSession();              // saved session? refresh if expired
+  if (!s){ showLogin(); return; }               // GATE: no session -> no data, just login
+  showApp();
+  await boot();
 })();
