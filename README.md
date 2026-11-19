@@ -59,7 +59,7 @@ by the user (2026-11-19), **not** the earlier sample assumptions
   (Mazda 160 / Shehzore 90 / Ravi 60), stops sequenced nearest-neighbour +
   2-opt on each customer's locked delivery days.
 - **Real street map** (Leaflet 1.9.4, vendored in `vendor/` — no CDN at
-  runtime) with free CARTO light basemap tiles (no API key;
+  runtime) with free Esri World Street Map tiles (no API key;
   `tile.openstreetmap.org` is deliberately not used — its tile policy
   blocked us before). Each route is a coloured polyline from its
   dispatch point with numbered stop pins in the route colour; amber

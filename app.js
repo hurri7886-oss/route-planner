@@ -649,8 +649,9 @@ function renderPlotSvg(dr){
 }
 
 /* ---------- real street map (Leaflet 1.9.4, vendored in vendor/) ----------
-   CARTO light basemap tiles (free, no key). tile.openstreetmap.org is
-   NOT used (its tile policy blocked us before). If Leaflet is missing
+   Esri World Street Map tiles (free, no key). CARTO basemaps were tried
+   first but now watermark tiles with "API KEY REQUIRED"; tile.openstreetmap.org
+   is NOT used (its tile policy blocked us before). If Leaflet is missing
    or the tiles never load, renderMap falls back to the schematic SVG. */
 let lmap = null, lmapLayer = null, lastMapSig = "";
 let tilesFailed = false, tileLoads = 0, tileErrors = 0;
@@ -662,8 +663,8 @@ function initLeaflet(){
   if (!el) return false;
   try {
     lmap = L.map(el);
-    const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-      attribution: "© OpenStreetMap contributors © CARTO", subdomains: "abcd", maxZoom: 19 });
+    const tiles = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "Tiles © Esri — Source: Esri, OpenStreetMap contributors", maxZoom: 19 });
     tiles.on("tileload", ()=>{ tileLoads++; });
     tiles.on("tileerror", ()=>{
       tileErrors++;
