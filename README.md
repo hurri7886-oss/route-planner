@@ -89,6 +89,23 @@ by the user (2026-11-19), **not** the earlier sample assumptions
   route (bottle-capacity blocked with a warning), re-optimise one route —
   all recalculated and saved (same shared move/reorder logic as the
   stop panel).
+- **Telling the drivers (WhatsApp + print)** — this is how a driver
+  learns their assignment for the day:
+  - Each vehicle row in ⚙ Advanced → fleet list has an editable
+    **driver mobile number** (`vehicle.phone`, saved digits-only;
+    `03…` numbers are converted to `92…` for the WhatsApp link).
+  - Every route card and the route detail panel have a
+    **📤 Send to driver** button. It opens WhatsApp addressed to that
+    vehicle's driver (or the WhatsApp share picker if no number is
+    saved yet) with a ready message: day, vehicle + driver name,
+    dispatch point to start from, stop/bottle/km totals, **every stop
+    numbered in order** (name — address — bottles), the route's
+    **Google Maps navigation link**, and a “Please confirm when you
+    receive this 👍” line.
+  - The route detail panel also has a **🖨 Print sheet** button that
+    prints a clean one-route handout (vehicle, driver, dispatch point,
+    day, totals, and a numbered stop table with customer / address /
+    bottles / phone) for drivers who are handed paper instead.
 - 📸 Full Picture one-screen overview for a top-to-bottom screenshot.
 - CSV import/export of customers, JSON full backup export, add-customer
   form, editable dispatch point names/locations, reset-to-seed.

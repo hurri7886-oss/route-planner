@@ -493,6 +493,68 @@ function gmapsLink(r){
   const wp = stops.map(c=>`${c.lat},${c.lng}`).join("|");
   return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${o}&waypoints=${encodeURIComponent(wp)}&travelmode=driving`;
 }
+
+/* ---------- driver communication ----------
+   Once routes are planned, each route is told to its driver two ways:
+   a WhatsApp message (route card + detail panel "📤 Send to driver")
+   and a printable route sheet (detail panel "🖨 Print sheet").
+   The driver's mobile lives on the vehicle (vehicle.phone, edited in
+   ⚙ Advanced on the fleet list) so the WhatsApp button can address
+   the message straight to that driver; with no number saved it opens
+   the WhatsApp share picker instead. */
+function normalisePhone(raw){ return String(raw ?? "").replace(/\D/g, ""); }
+function waPhone(v){ // digits for wa.me: 03xx… -> 923xx…; already-92 stays
+  let d = normalisePhone(v && v.phone);
+  if (d.startsWith("0")) d = "92" + d.slice(1);
+  return d;
+}
+function driverMessage(r){
+  const veh = vehById(r.vehicleId);
+  const stops = r.stopIds.map(custById).filter(Boolean);
+  return [
+    `Route Planner — ${r.day}`,
+    `Vehicle: ${veh?.label || ""} (${veh?.driver || ""})`,
+    `Start: ${routeDepot(r).name}`,
+    `Stops: ${stops.length} · Bottles: ${r.bottles} · ~${r.km} km`,
+    ...stops.map((c,i)=>`${i+1}. ${c.name} — ${c.address} (${c.bottlesPerDrop} bottles)`),
+    `Navigate: ${gmapsLink(r)}`,
+    "Please confirm when you receive this. 👍",
+  ].join("\n");
+}
+function waLink(r){
+  const text = encodeURIComponent(driverMessage(r));
+  const num = waPhone(vehById(r.vehicleId));
+  return num ? `https://wa.me/${num}?text=${text}` : `https://wa.me/?text=${text}`;
+}
+/* Print sheet: fill the dedicated #printSheet section with just this
+   route, then window.print() — the @media print stylesheet hides the
+   whole app and shows only that section, as a one-route handout. */
+function renderPrintSheet(r){
+  const el = document.getElementById("printSheet");
+  if (!el) return;
+  const veh = vehById(r.vehicleId);
+  const dep = routeDepot(r);
+  const stops = r.stopIds.map(custById).filter(Boolean);
+  el.innerHTML = `
+    <h1>Route Sheet — ${esc(r.day)}</h1>
+    <p class="ps-sub">Route Planner · Lahore 19L Home &amp; Business Delivery</p>
+    <table class="ps-facts">
+      <tr><th>Vehicle</th><td>${esc(veh?.label || "")} — ${esc(veh?.type || "")}</td>
+          <th>Driver</th><td>${esc(veh?.driver || "")}${veh?.phone ? ` · ${esc(veh.phone)}` : ""}</td></tr>
+      <tr><th>Start / return</th><td>${esc(dep.name)} (${esc(dep.type || "")})</td>
+          <th>Day</th><td>${esc(r.day)}</td></tr>
+      <tr><th>Stops</th><td>${stops.length}</td>
+          <th>Totals</th><td>${r.bottles} bottles · ${r.km} km · ~${r.mins} min</td></tr>
+    </table>
+    <table class="ps-stops">
+      <thead><tr><th>#</th><th>Customer</th><th>Address</th><th>Bottles</th><th>Phone</th></tr></thead>
+      <tbody>
+      ${stops.map((c,i)=>`<tr><td>${i+1}</td><td>${esc(c.name)}</td><td>${esc(c.address)} — ${esc(c.area)}</td><td>${c.bottlesPerDrop}</td><td>${esc(c.phone || "")}</td></tr>`).join("")}
+      </tbody>
+    </table>
+    <p class="ps-foot">Start at <strong>${esc(dep.name)}</strong>, deliver in the order above, then return to <strong>${esc(dep.name)}</strong>.</p>`;
+}
+function printRoute(r){ renderPrintSheet(r); window.print(); }
 function render(){
   // day tabs
   $("#dayTabs").innerHTML = DAYS.map(dy=>
@@ -559,6 +621,7 @@ function render(){
       <p>${areaTxt}</p>
       <p>This truck this week: ${new Set(state.routes.filter(x=>x.vehicleId===r.vehicleId).flatMap(x=>x.stopIds)).size} / target ~${state.perTruck}</p>
       <a class="btn small ghost" target="_blank" rel="noopener" href="${gmapsLink(r)}" onclick="event.stopPropagation()">Open in Google Maps ↗</a>
+      <a class="btn small teal" target="_blank" rel="noopener" href="${waLink(r)}" onclick="event.stopPropagation()">📤 Send to driver</a>
     </article>`;
   }).join("") || `<p class="hint">No routes for ${selectedDay} yet — tick customers above and tap Plan Routes.</p>`;
   document.querySelectorAll(".route-card").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.route; mapFocus = el.dataset.route; render(); });
@@ -593,8 +656,16 @@ function render(){
   const byType = {};
   state.vehicles.forEach(v=>{ byType[v.type] = byType[v.type] || {n:0, cap:v.capacityBottles}; byType[v.type].n++; });
   $("#fleetList").innerHTML = Object.entries(byType).map(([t,x])=>`<p>🚚 <strong>${x.n} × ${t}</strong> — ${x.cap} bottles each</p>`).join("")
-    + `<p><strong>Total fleet: ${state.vehicles.length} vehicles</strong></p>`
-    + state.vehicles.map(v=>`<p>· <strong>${v.label}</strong> — ${v.driver} · ${v.capacityBottles} bottles · ${depotById(v.dispatchId)?.name||""}</p>`).join("");
+    + `<p><strong>Total fleet: ${state.vehicles.length} vehicles</strong> — add each driver's mobile on their vehicle row; the 📤 Send to driver buttons send that route to this number on WhatsApp.</p>`
+    + state.vehicles.map(v=>`<div class="stop"><span class="sp"><strong>${v.label}</strong> — ${v.driver} · ${v.capacityBottles} bottles · ${depotById(v.dispatchId)?.name||""}</span>
+      <input data-veh-phone="${v.id}" value="${v.phone||""}" placeholder="Driver mobile (03…)" aria-label="Driver mobile for ${v.label}" inputmode="tel">
+      <button class="btn small primary" data-veh-phone-save="${v.id}">Save</button></div>`).join("");
+  document.querySelectorAll("[data-veh-phone-save]").forEach(b=> b.onclick = ()=>{
+    const v = vehById(+b.dataset.vehPhoneSave); if (!v) return;
+    const inp = document.querySelector(`[data-veh-phone="${v.id}"]`);
+    v.phone = normalisePhone(inp ? inp.value : ""); // digits only; wa.me link converts 03… -> 923…
+    save(); render();
+  });
 }
 function renderCustomerList(){
   const wrap = $("#customerListWrap"); if (wrap.hidden) return;
@@ -821,7 +892,10 @@ function renderDetail(){
   const others = state.routes.filter(x=>x.id!==r.id);
   el.innerHTML = `<h3>${veh?.label||""} — ${r.day} · ${r.stopIds.length} stops · ${r.km} km · ${r.bottles} bottles · ~${r.mins} min</h3>
     <div class="row wrap"><button class="btn small primary" id="optOne">↻ Re-optimise this route only</button>
-    <a class="btn small ghost" target="_blank" rel="noopener" href="${gmapsLink(r)}">Google Maps ↗</a></div>
+    <a class="btn small ghost" target="_blank" rel="noopener" href="${gmapsLink(r)}">Google Maps ↗</a>
+    <a class="btn small teal" target="_blank" rel="noopener" href="${waLink(r)}">📤 Send to driver</a>
+    <button class="btn small ghost" id="printRouteBtn">🖨 Print sheet</button></div>
+    <p class="hint">Send the route to the driver on WhatsApp, or print the sheet.</p>
     <div class="stop"><span class="n">D</span><span class="sp"><strong>Dispatch point</strong> — ${routeDepot(r).name} (${routeDepot(r).type})</span></div>
     ${r.stopIds.map((id,i)=>{ const c = custById(id); if (!c) return "";
       return `<div class="stop"><span class="n">${i+1}</span><span class="sp"><strong>${c.name}</strong> — ${c.area} · ${c.bottlesPerDrop} bottles</span>
@@ -835,6 +909,8 @@ function renderDetail(){
     const stops = sequence(r.stopIds.map(custById).filter(Boolean), routeDepot(r));
     r.stopIds = stops.map(c=>c.id); recalcRoute(r); save(); render();
   };
+  const prBtn = el.querySelector("#printRouteBtn");
+  if (prBtn) prBtn.onclick = ()=> printRoute(r);
   el.querySelectorAll("[data-up],[data-down]").forEach(b=> b.onclick = ()=>{
     const i = +(b.dataset.up ?? b.dataset.down); const j = b.dataset.up !== undefined ? i-1 : i+1;
     if (reorderStop(r, i, j)){ save(); render(); }
@@ -1064,6 +1140,7 @@ async function boot(){
   if (!fromShared && !load()) await seed();
   if (!state) return;
   if (!state.perTruck) state.perTruck = 90;
+  if (Array.isArray(state.vehicles)) state.vehicles.forEach(v=>{ if (typeof v.phone !== "string") v.phone = ""; }); // driver mobile (older states have none)
   if (!state.unassigned || typeof state.unassigned !== "object" || Array.isArray(state.unassigned)) state.unassigned = {};
   if (!Array.isArray(state.depots) || !state.depots.length){ localStorage.removeItem(LS_KEY); await seed(); }
   wire(); render(); updateSyncStatus();
