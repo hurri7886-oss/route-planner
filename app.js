@@ -629,7 +629,7 @@ function renderPlotSvg(dr){
     });
   });
   (state.depots||[]).forEach(dep=>{
-    s += `<g><circle cx="${X(dep.lng)}" cy="${Y(dep.lat)}" r="12" fill="#f9a825"/>
+    s += `<g class="depot-g" data-dep="${dep.id}" style="cursor:pointer"><circle cx="${X(dep.lng)}" cy="${Y(dep.lat)}" r="12" fill="#f9a825"/>
     <text x="${X(dep.lng)}" y="${Y(dep.lat)+4}" text-anchor="middle" font-size="11" font-weight="800" fill="#4e342e">D</text>
     <text x="${X(dep.lng)}" y="${Y(dep.lat)-16}" text-anchor="middle" font-size="10" font-weight="700" fill="#4e342e">${dep.name}</text></g>`;
   });
@@ -646,6 +646,60 @@ function renderPlotSvg(dr){
     showStopPanel(c.id, rid);
     render();
   });
+  // Clicking a D on the schematic can't drag/rename inline, so point the
+  // user at the Advanced editor for that point (and open the section).
+  svg.querySelectorAll(".depot-g").forEach(g=> g.onclick = ()=>{
+    const dep = depotById(g.dataset.dep); if (!dep) return;
+    panelStop = null;
+    const info = $("#pinInfo");
+    if (info){
+      info.hidden = false;
+      info.innerHTML = `<div class="sp-head"><span class="sp-title">D — <strong>${dep.name}</strong> (${dep.type})</span>
+        <button class="sp-close" id="spDepClose" title="Close">✕</button></div>
+        <p class="sp-meta">${dep.area || ""}${dep.address ? `<br>${dep.address}` : ""}</p>
+        <p class="sp-meta">To rename this dispatch point or change its location, use its editor in <strong>⚙ Advanced</strong> (opened below). On the street map you can also drag its amber D pin to move it.</p>`;
+      const cb = info.querySelector("#spDepClose"); if (cb) cb.onclick = closeStopPanel;
+    }
+    const adv = document.getElementById("advanced"); if (adv) adv.open = true;
+    const inp = document.querySelector(`[data-dep-name="${dep.id}"]`);
+    if (inp){ if (inp.scrollIntoView) inp.scrollIntoView({ block: "center" }); if (inp.focus) inp.focus(); }
+  });
+}
+
+/* ---------- dispatch point editing (map drag + popup rename) ----------
+   Warehouses / mini shops are edited in two places that write the same
+   state: the ⚙ Advanced inputs, and the map itself — drag an amber D pin
+   to move its point, click it to rename in its popup. Every change goes
+   through save(), so it lands in the shared Supabase state and the
+   change log ("Fleet/dispatch points edited"), and existing routes are
+   recalculated from the new location straight away. */
+function moveDepot(depId, lat, lng){
+  const dep = depotById(depId); if (!dep) return false;
+  lat = Math.round((+lat) * 1e6) / 1e6;
+  lng = Math.round((+lng) * 1e6) / 1e6;
+  if (!isFinite(lat) || !isFinite(lng)) return false;
+  dep.lat = lat; dep.lng = lng;
+  state.routes.forEach(recalcRoute); // km/mins from the new point
+  save(); render();
+  return true;
+}
+function renameDepot(depId, name){
+  const dep = depotById(depId); if (!dep) return false;
+  name = String(name == null ? "" : name).trim();
+  if (!name) return false;
+  dep.name = name;
+  save(); render();
+  return true;
+}
+function buildDepotPopup(dep){
+  const el = document.createElement("div");
+  el.className = "depot-pop";
+  el.innerHTML = `<strong>${dep.name}</strong> (${dep.type})<br>${dep.area || ""}` +
+    (dep.address ? `<br><small>${dep.address}</small>` : "") +
+    `<br><small>Drag this pin to move the dispatch point.</small>` +
+    `<div class="dp-edit"><label>Rename <input class="dp-name-input" value="${dep.name}" aria-label="Dispatch point name"></label>` +
+    `<button type="button" class="btn small primary dp-save">Save</button></div>`;
+  return el;
 }
 
 /* ---------- real street map (Leaflet 1.9.4, vendored in vendor/) ----------
@@ -701,17 +755,28 @@ function renderMap(dr){
 function drawLeaflet(dr){
   const sig = JSON.stringify([selectedDay, selectedRouteId, mapFocus,
     dr.map(r=>r.id+":"+r.stopIds.join(",")),
-    (state.depots||[]).map(d=>d.id+":"+d.lat+","+d.lng),
+    (state.depots||[]).map(d=>d.id+":"+d.name+":"+d.lat+","+d.lng),
     unassignedList(selectedDay)]);
   if (sig === lastMapSig){ if (lmap) lmap.invalidateSize(); return; }
   lastMapSig = sig;
   lmapLayer.clearLayers();
   const allPts = [];
   (state.depots||[]).forEach(dep=>{
-    L.marker([dep.lat, dep.lng], { icon: L.divIcon({ className: "", html: `<div class="depot-pin">D</div>`, iconSize: [24,24], iconAnchor: [12,12] }) })
-      .bindTooltip(dep.name, { direction: "top", offset: [0,-14] })
-      .bindPopup(`<strong>${dep.name}</strong> (${dep.type})<br>${dep.area||""}`)
-      .addTo(lmapLayer);
+    const mk = L.marker([dep.lat, dep.lng], { draggable: true,
+      icon: L.divIcon({ className: "", html: `<div class="depot-pin">D</div>`, iconSize: [24,24], iconAnchor: [12,12] }) });
+    mk.bindTooltip(dep.name, { direction: "top", offset: [0,-14] });
+    const popEl = buildDepotPopup(dep);
+    mk.bindPopup(popEl);
+    mk.on("popupopen", ()=>{
+      const btn = popEl.querySelector(".dp-save");
+      const input = popEl.querySelector(".dp-name-input");
+      if (btn) btn.onclick = ()=>{ renameDepot(dep.id, input ? input.value : ""); };
+    });
+    mk.on("dragend", ()=>{
+      const ll = mk.getLatLng();
+      if (ll) moveDepot(dep.id, ll.lat, ll.lng);
+    });
+    mk.addTo(lmapLayer);
     allPts.push([dep.lat, dep.lng]);
   });
   dr.forEach((r,i)=>{

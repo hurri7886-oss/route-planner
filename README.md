@@ -67,6 +67,13 @@ by the user (2026-11-19), **not** the earlier sample assumptions
   the app automatically falls back to the schematic SVG plot. A legend
   under the map explains the pins. Each route also has an **Open in
   Google Maps** link.
+- **Editable dispatch points**: rename a warehouse / mini shop or move
+  it — either in ⚙ Advanced (name + latitude/longitude inputs per point)
+  or directly on the map: **drag an amber D pin** to move the point,
+  **click a D pin** to rename it in its popup. Existing routes are
+  recalculated from the new location immediately, and every change is
+  saved to the shared state and the change log. On the schematic
+  fallback, clicking a D opens the Advanced editor for that point.
 - **Click any stop pin** (street map or schematic) to open the stop
   panel: customer name, address, area, bottles, delivery days, phone,
   current route/vehicle and stop number — plus **↑/↓ reorder**, a
