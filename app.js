@@ -1178,6 +1178,7 @@ function importCsv(file){
     const ix = name => M[name];
     if (ix("name") < 0) return alert("That CSV has no customer name column. Use the template: id,name,area,address,lat,lng,bottles,delivery days,phone");
     let added = 0, updated = 0, skipped = 0;
+    const importedIds = new Set();
     for (const r of rows.slice(1)){
       if (!r[ix("name")]){ skipped++; continue; }
       const rec = {
@@ -1191,17 +1192,22 @@ function importCsv(file){
       };
       const ex = custById(rec.id);
       if (ex){ Object.assign(ex, rec); updated++; } else { state.customers.push(rec); added++; }
+      importedIds.add(rec.id);
     }
     save(); render();
+    if (importedIds.size && confirm(`Import done: ${added} added, ${updated} updated${skipped ? `, ${skipped} rows skipped (no name)` : ""}.\n\nServe ONLY the ${importedIds.size} customers in this file this week?\nOK = only these get routes this week (everyone else skipped, not deleted)\nCancel = keep previously ticked customers too`)){
+      state.customers.forEach(c=> c.serveThisWeek = importedIds.has(c.id));
+      save(); render();
+    }
     const missing = state.customers.filter(c=> !(c.lat && c.lng) || (c.lat===0 && c.lng===0));
     if (missing.length){
-      if (confirm(`Import done: ${added} added, ${updated} updated${skipped ? `, ${skipped} rows skipped (no name)` : ""}.\n\n${missing.length} customers have no coordinates. Look them up from their addresses now? (free, takes ~1 second each)`)){
+      if (confirm(`${missing.length} customers have no coordinates. Look them up from their addresses now? (free, takes ~1 second each)`)){
         geocodeMissing(missing).then(({exact, approx, failed})=>{
           save(); render();
           alert(`Coordinates: ${exact} found exactly, ${approx} placed at their area centre (approximate — drag or edit later), ${failed} not found.\n\nTap Plan Routes to rebuild.`);
         });
       } else alert("Import done. You can fill coordinates later in ⚙ Advanced → Fill missing coordinates.");
-    } else alert(`Import done: ${added} added, ${updated} updated${skipped ? `, ${skipped} rows skipped (no name)` : ""}. Tap Plan Routes to rebuild.`);
+    } else if (!importedIds.size) alert(`Import done: ${added} added, ${updated} updated${skipped ? `, ${skipped} rows skipped (no name)` : ""}. Tap Plan Routes to rebuild.`);
   });
 }
 
