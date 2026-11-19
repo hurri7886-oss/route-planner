@@ -1157,7 +1157,7 @@ const CSV_ALIASES = {
   lat: ["lat","latitude"],
   lng: ["lng","lon","long","longitude"],
   bottlesPerDrop: ["bottlesperdrop","bottles","bottlesordered","noofbottles","noofbottlesordered","qty","quantity","order"],
-  deliveryDays: ["deliverydays","deliveryday","dayofdelivery","days","day","delivery"],
+  deliveryDays: ["deliverydays","deliveryday","dayofdelivery","days","day","delivery","deliverydate","date"],
   phone: ["phone","phonenumber","mobile","contact","cell","mobilenumber"],
   serveThisWeek: ["servethisweek","serve","active","serving"],
 };
@@ -1170,15 +1170,36 @@ function csvHeaderMap(head){
   }
   return map;
 }
+function dateToDay(tok){
+  // A calendar date -> its weekday, e.g. "21/11/2026", "2026-11-21", "21 Nov 2026" -> "Sat"
+  const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  let m = tok.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return DOW[new Date(+m[1], +m[2]-1, +m[3]).getDay()];
+  m = tok.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/); // DD/MM/YYYY (Pakistan format)
+  if (m){ let y = +m[3]; if (y < 100) y += 2000; return DOW[new Date(y, +m[2]-1, +m[1]).getDay()]; }
+  if (/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(tok) && /\d/.test(tok)){
+    const d = new Date(tok);
+    if (!isNaN(d)) return DOW[d.getDay()];
+  }
+  return null;
+}
 function normalizeDays(s){
   if (!s) return "Mon,Thu";
   const full = { monday:"Mon", tuesday:"Tue", wednesday:"Wed", thursday:"Thu", friday:"Fri", saturday:"Sat", sunday:"Sun" };
-  return String(s).split(/[,\s;\/]+/).filter(Boolean).map(tok=>{
-    const t = tok.trim().toLowerCase();
-    if (full[t]) return full[t];
-    const three = t.slice(0,3);
-    return ["mon","tue","wed","thu","fri","sat","sun"].includes(three) ? three[0].toUpperCase()+three.slice(1) : tok.trim();
-  }).join(",");
+  const out = [];
+  for (const chunk of String(s).split(/[,;]+/)){
+    const c = chunk.trim(); if (!c) continue;
+    const asDate = dateToDay(c);
+    if (asDate){ out.push(asDate); continue; }
+    for (const tok of c.split(/\s+/)){
+      const t = tok.trim().toLowerCase(); if (!t) continue;
+      const d2 = dateToDay(tok); if (d2){ out.push(d2); continue; }
+      if (full[t]){ out.push(full[t]); continue; }
+      const three = t.slice(0,3);
+      out.push(["mon","tue","wed","thu","fri","sat","sun"].includes(three) ? three[0].toUpperCase()+three.slice(1) : tok.trim());
+    }
+  }
+  return [...new Set(out)].join(",");
 }
 function downloadTemplate(){
   const lines = [
