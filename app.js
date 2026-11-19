@@ -1268,38 +1268,14 @@ async function logLogin(){
     try { sessionStorage.setItem("rp_login_logged", session.email); } catch(e){}
   } catch(e){ /* table may not exist until the setup SQL is run */ }
 }
-async function loadLogins(){
-  const el = document.getElementById("loginActivity");
-  if (!el) return;
-  if (!SB || !session){ el.innerHTML = `<p class="hint">Sign in to see login activity.</p>`; return; }
-  el.innerHTML = `<p class="hint">Loading…</p>`;
-  try {
-    const res = await sbFetch(`/rest/v1/app_logins?select=logged_at,user_email,ip,user_agent&order=logged_at.desc&limit=30`);
-    if (!res.ok) throw new Error("logins load failed: " + res.status);
-    const rows = await res.json();
-    if (!rows.length){ el.innerHTML = `<p class="hint">No sign-ins logged yet — they start appearing after the setup SQL is run and someone signs in.</p>`; return; }
-    const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Karachi", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true });
-    const shortUa = ua => {
-      ua = String(ua || "");
-      const dev = /Mobile|Android/i.test(ua) ? "Mobile" : "Desktop";
-      const br = /Edg\//i.test(ua) ? "Edge" : /Chrome/i.test(ua) ? "Chrome" : /Firefox/i.test(ua) ? "Firefox" : /Safari/i.test(ua) ? "Safari" : "Browser";
-      return `${dev} · ${br}`;
-    };
-    el.innerHTML = rows.map(r =>
-      `<div class="stop"><span class="sp"><strong>${esc(r.user_email)}</strong> — IP ${esc(r.ip || "unknown")} · ${esc(shortUa(r.user_agent))}<br><small>${fmt.format(new Date(r.logged_at))} PKT</small></span></div>`).join("");
-  } catch(e){
-    el.innerHTML = `<p class="hint">Could not load login activity yet — the one-time setup SQL may still need to be run in Supabase.</p>`;
-  }
-}
 
 /* ---------- wiring ---------- */
 function wire(){
   $("#planBtn").onclick = planRoutes;
   const soBtn = $("#signOutBtn"); if (soBtn) soBtn.onclick = signOut;
   const rhBtn = $("#refreshHistoryBtn"); if (rhBtn) rhBtn.onclick = loadChangeHistory;
-  const rlBtn = $("#refreshLoginsBtn"); if (rlBtn) rlBtn.onclick = loadLogins;
   const adv = document.getElementById("advanced");
-  if (adv) adv.addEventListener("toggle", ()=>{ if (adv.open){ loadChangeHistory(); loadLogins(); if (lmap) setTimeout(()=>lmap.invalidateSize(), 60); } });
+  if (adv) adv.addEventListener("toggle", ()=>{ if (adv.open){ loadChangeHistory(); if (lmap) setTimeout(()=>lmap.invalidateSize(), 60); } });
   $("#perTruckSave").onclick = ()=> setPerTruck($("#perTruckInput").value);
   $("#serveAllBtn").onclick = ()=>{ state.customers.forEach(c=>c.serveThisWeek=true); save(); render(); };
   $("#skipAllBtn").onclick = ()=>{ state.customers.forEach(c=>c.serveThisWeek=false); save(); render(); };
