@@ -1130,19 +1130,63 @@ async function geocodeMissing(list, progress){
   }
   return { exact, approx, failed };
 }
+const CSV_ALIASES = {
+  id: ["id","customerid","code"],
+  name: ["name","customername","customer","client"],
+  area: ["area","zone","sector","town"],
+  address: ["address","location","fulladdress"],
+  lat: ["lat","latitude"],
+  lng: ["lng","lon","long","longitude"],
+  bottlesPerDrop: ["bottlesperdrop","bottles","bottlesordered","noofbottles","noofbottlesordered","qty","quantity","order"],
+  deliveryDays: ["deliverydays","deliveryday","dayofdelivery","days","day","delivery"],
+  phone: ["phone","phonenumber","mobile","contact","cell","mobilenumber"],
+  serveThisWeek: ["servethisweek","serve","active","serving"],
+};
+function csvHeaderMap(head){
+  const norm = s => String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const nhead = head.map(norm);
+  const map = {};
+  for (const [field, aliases] of Object.entries(CSV_ALIASES)){
+    map[field] = nhead.findIndex(h => aliases.includes(h));
+  }
+  return map;
+}
+function normalizeDays(s){
+  if (!s) return "Mon,Thu";
+  const full = { monday:"Mon", tuesday:"Tue", wednesday:"Wed", thursday:"Thu", friday:"Fri", saturday:"Sat", sunday:"Sun" };
+  return String(s).split(/[,\s;\/]+/).filter(Boolean).map(tok=>{
+    const t = tok.trim().toLowerCase();
+    if (full[t]) return full[t];
+    const three = t.slice(0,3);
+    return ["mon","tue","wed","thu","fri","sat","sun"].includes(three) ? three[0].toUpperCase()+three.slice(1) : tok.trim();
+  }).join(",");
+}
+function downloadTemplate(){
+  const lines = [
+    "id,name,area,address,lat,lng,bottles,delivery days,phone",
+    "1,Ahmed Raza Residence,DHA / Cantt,House 12 Street 4 Phase 5 DHA,31.4621,74.4098,2,Mon Thu,03001234567",
+    "2,City Mart Store,Gulberg / Garden Town,Main Boulevard Gulberg,31.5042,74.3535,6,Tue Fri Sat,03219876543",
+    "3,Fatima Home,Johar Town / Wapda Town,Block H Johar Town,31.4676,74.2708,3,Wednesday,03005551122",
+  ];
+  download(lines.join("\n"), "customers-template.csv", "text/csv");
+}
 function importCsv(file){
   file.text().then(text=>{
     const rows = parseCsv(text); if (rows.length < 2) return alert("No data rows found in that CSV.");
     const head = rows[0].map(h=>h.trim());
-    const ix = name => head.indexOf(name);
-    let added = 0, updated = 0;
+    const M = csvHeaderMap(head);
+    const ix = name => M[name];
+    if (ix("name") < 0) return alert("That CSV has no customer name column. Use the template: id,name,area,address,lat,lng,bottles,delivery days,phone");
+    let added = 0, updated = 0, skipped = 0;
     for (const r of rows.slice(1)){
-      if (!r[ix("name")]) continue;
+      if (!r[ix("name")]){ skipped++; continue; }
       const rec = {
-        id: +r[ix("id")] || Math.max(0, ...state.customers.map(c=>c.id)) + 1,
-        name: r[ix("name")], area: r[ix("area")] || "Other", address: r[ix("address")] || "",
-        lat: +r[ix("lat")], lng: +r[ix("lng")], bottlesPerDrop: +r[ix("bottlesPerDrop")] || 2,
-        deliveryDays: r[ix("deliveryDays")] || "Mon,Thu", phone: ix("phone")>=0 ? r[ix("phone")] : "",
+        id: (ix("id")>=0 && +r[ix("id")]) || Math.max(0, ...state.customers.map(c=>c.id)) + 1,
+        name: r[ix("name")], area: ix("area")>=0 && r[ix("area")] ? r[ix("area")] : "Other", address: ix("address")>=0 ? (r[ix("address")] || "") : "",
+        lat: ix("lat")>=0 ? +r[ix("lat")] : 0, lng: ix("lng")>=0 ? +r[ix("lng")] : 0,
+        bottlesPerDrop: ix("bottlesPerDrop")>=0 ? (+r[ix("bottlesPerDrop")] || 2) : 2,
+        deliveryDays: normalizeDays(ix("deliveryDays")>=0 ? r[ix("deliveryDays")] : ""),
+        phone: ix("phone")>=0 ? (r[ix("phone")] || "") : "",
         serveThisWeek: ix("serveThisWeek")>=0 ? /^(true|1|yes)$/i.test(r[ix("serveThisWeek")]) : true,
       };
       const ex = custById(rec.id);
@@ -1151,13 +1195,13 @@ function importCsv(file){
     save(); render();
     const missing = state.customers.filter(c=> !(c.lat && c.lng) || (c.lat===0 && c.lng===0));
     if (missing.length){
-      if (confirm(`Import done: ${added} added, ${updated} updated.\n\n${missing.length} customers have no coordinates. Look them up from their addresses now? (free, takes ~1 second each)`)){
+      if (confirm(`Import done: ${added} added, ${updated} updated${skipped ? `, ${skipped} rows skipped (no name)` : ""}.\n\n${missing.length} customers have no coordinates. Look them up from their addresses now? (free, takes ~1 second each)`)){
         geocodeMissing(missing).then(({exact, approx, failed})=>{
           save(); render();
           alert(`Coordinates: ${exact} found exactly, ${approx} placed at their area centre (approximate — drag or edit later), ${failed} not found.\n\nTap Plan Routes to rebuild.`);
         });
       } else alert("Import done. You can fill coordinates later in ⚙ Advanced → Fill missing coordinates.");
-    } else alert(`Import done: ${added} added, ${updated} updated. Tap Plan Routes to rebuild.`);
+    } else alert(`Import done: ${added} added, ${updated} updated${skipped ? `, ${skipped} rows skipped (no name)` : ""}. Tap Plan Routes to rebuild.`);
   });
 }
 
@@ -1215,6 +1259,7 @@ function wire(){
     window.scrollTo(0,0);
   };
   $("#exportCsvBtn").onclick = exportCsv;
+  const tplBtn = $("#templateCsvBtn"); if (tplBtn) tplBtn.onclick = downloadTemplate;
   $("#exportJsonBtn").onclick = ()=> download(JSON.stringify(state, null, 2), "route-planner-backup.json", "application/json");
   $("#importCsvInput").onchange = e=>{ if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ""; };
   $("#resetBtn").onclick = async ()=>{ if (confirm("Reset the SHARED team data to the original 500-customer seed? This replaces everyone's data.")){ localStorage.removeItem(LS_KEY); await seed(); render(); } };

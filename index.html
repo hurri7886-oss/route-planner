@@ -144,6 +144,7 @@
 
   <h3>Import / Export customers (CSV)</h3>
   <div class="row wrap">
+    <button class="btn ghost" id="templateCsvBtn">⬇ Download CSV template</button>
     <button class="btn ghost" id="exportCsvBtn">⬇ Export customers CSV</button>
     <button class="btn ghost" id="exportJsonBtn">⬇ Export all data (JSON backup)</button>
     <label class="btn ghost filelabel">⬆ Import customers CSV
@@ -152,7 +153,7 @@
     <button class="btn ghost" id="geocodeMissingBtn">📍 Fill missing coordinates from addresses</button>
     <button class="btn ghost danger" id="resetBtn">Reset to seed data (500 customers)</button>
   </div>
-  <p class="hint">CSV columns: id,name,area,address,lat,lng,bottlesPerDrop,deliveryDays,phone,serveThisWeek,notes. Import replaces matching ids and adds new rows.</p>
+  <p class="hint">Customer CSV — one row per customer: <strong>id, name, area, address, lat, lng, bottles (ordered per delivery), delivery days, phone</strong>. Header names are flexible (latitude/longitude, bottles ordered, day of delivery, mobile — all understood). Delivery days can be "Mon Thu", "Mon,Thu" or full names like "Wednesday". Same id = update that customer; new id = add. Rows without coordinates are offered an automatic address lookup after import.</p>
 
   <h3>Add a customer</h3>
   <form id="addCustForm" class="addform">
