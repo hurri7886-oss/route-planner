@@ -246,7 +246,7 @@ function routeTotals(stops, depot){ // stops start/end at their dispatch point
   for (const c of stops){ km += hav(prev, c); prev = c; }
   km += hav(prev, dep);
   const bottles = stops.reduce((s,c)=>s + (+c.bottlesPerDrop||0), 0);
-  const mins = Math.round(km/28*60 + stops.length*6); // ~28 km/h city + 6 min/stop
+  const mins = Math.round(km/28*60 + stops.length*8); // ~28 km/h city + 8 min/stop (user-set 2026-11-20)
   return { km: Math.round(km*10)/10, bottles, mins };
 }
 function sequence(stops, depot){ // nearest neighbour + 2-opt, dispatch point start/end
