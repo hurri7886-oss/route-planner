@@ -18,6 +18,21 @@ const $ = s => document.querySelector(s);
 const custById = id => state.customers.find(c => c.id === id);
 const vehById = id => state.vehicles.find(v => v.id === id);
 const depotById = id => (state.depots||[]).find(d => d.id === id) || (state.depots||[])[0];
+function defaultFleetPlan(){
+  // The real daily fleet as specified by the user 2026-11-20. Everything here
+  // is editable in ⚙ Advanced → Fleet setup; "Rebuild fleet" applies it.
+  return {
+    caps: { "Mazda": 160, "Shehzore": 90, "Ravi / Pick-up": 60, "Bolan": 45, "FAW": 50 },
+    counts: {
+      dp1: { "Mazda": 17, "Shehzore": 1, "FAW": 1 },              // Kamaha — 19
+      dp2: { "Shehzore": 1, "Bolan": 1 },                          // DHA Water shop — 2
+      dp3: { "Mazda": 20, "Shehzore": 4 },                         // Samsani — 24
+      dp4: { "Mazda": 10 },                                        // LDA Watershop — 10
+      dp5: { "Mazda": 13, "Shehzore": 3 }                          // Harbanspura — 16 (split assumed, editable)
+    }
+  };
+}
+function fleetPlan(){ return state.fleetPlan || defaultFleetPlan(); }
 function depotPool(dep){
   // Vehicles that may run from this hub today: homed vehicles, capped per
   // type by the hub's allocation (dep.alloc = { "Mazda": n, ... }).
@@ -591,6 +606,95 @@ function renderPrintSheet(r){
     <p class="ps-foot">Start at <strong>${esc(dep.name)}</strong>, deliver in the order above, then return to <strong>${esc(dep.name)}</strong>.</p>`;
 }
 function printRoute(r){ renderPrintSheet(r); window.print(); }
+function renderFleetSetup(){
+  const host = $("#fleetSetup"); if (!host) return;
+  const plan = fleetPlan();
+  const types = Object.keys(plan.caps);
+  const totalFor = t => (state.depots||[]).reduce((s,d)=> s + (+((plan.counts[d.id]||{})[t]||0)), 0);
+  const grand = types.reduce((s,t)=> s + totalFor(t), 0);
+  host.innerHTML = `<div class="depot-card">
+    <div class="dc-head"><div class="dc-title"><strong>🚚 Fleet setup</strong><br>
+    <small>How many vehicles of each type are <strong>based</strong> at each hub, and what each type carries. Edit any number, then press <strong>Rebuild fleet</strong> to apply. Driver mobile numbers are kept where the same vehicle slot exists. Re-run Plan Routes afterwards.</small></div></div>
+    <div class="dc-fleet"><div class="dc-fleet-title">Capacity per vehicle type (19L bottles)</div>
+      <div class="dc-types">${types.map(t=>`<div class="dc-typebox"><span>${t}</span><input type="number" min="1" step="1" value="${plan.caps[t]}" data-fcap="${t}" aria-label="${t} capacity"> <small>bottles</small></div>`).join("")}
+      <div class="dc-typebox"><span>＋ New type</span><input id="newTypeName" placeholder="Name" style="width:84px"> <input id="newTypeCap" type="number" placeholder="Cap" style="width:56px"> <button class="btn small ghost" id="addTypeBtn" type="button">Add</button></div></div>
+    </div>
+    <div class="dc-fleet"><div class="dc-fleet-title">Vehicles based at each hub</div>
+      ${(state.depots||[]).map(dep=>`<div class="dc-hubrow"><span class="dc-hubname">${dep.name}</span>
+        ${types.map(t=>`<label>${t} <input type="number" min="0" step="1" value="${+((plan.counts[dep.id]||{})[t]||0)}" data-fcount="${dep.id}" data-type="${t}" style="width:56px" aria-label="${t} based at ${dep.name}"></label>`).join("")}
+      </div>`).join("")}
+      <small class="dc-hint" id="fleetTotals">Total: ${types.map(t=>`${totalFor(t)} × ${t}`).join(" · ")} = <strong>${grand} vehicles</strong></small>
+    </div>
+    <div class="dc-foot"><button class="btn primary" id="rebuildFleetBtn" type="button">Rebuild fleet from this setup</button></div>
+  </div>`;
+  const recount = ()=>{
+    const p = readFleetPlanUI(); if (!p) return;
+    const tf = t => (state.depots||[]).reduce((s,d)=> s + (+((p.counts[d.id]||{})[t]||0)), 0);
+    const g = Object.keys(p.caps).reduce((s,t)=> s + tf(t), 0);
+    const el = $("#fleetTotals");
+    if (el) el.innerHTML = `Total: ${Object.keys(p.caps).map(t=>`${tf(t)} × ${t}`).join(" · ")} = <strong>${g} vehicles</strong>`;
+  };
+  host.querySelectorAll("[data-fcap],[data-fcount]").forEach(inp=> inp.addEventListener("input", recount));
+  const addBtn = $("#addTypeBtn");
+  if (addBtn) addBtn.onclick = ()=>{
+    const name = ($("#newTypeName").value || "").trim();
+    const cap = Math.max(1, Math.round(+$("#newTypeCap").value || 0));
+    if (!name || !cap) { alert("Give the new type a name and a bottle capacity."); return; }
+    const p = readFleetPlanUI() || fleetPlan();
+    if (p.caps[name]) { alert(`Type "${name}" already exists.`); return; }
+    p.caps[name] = cap; state.fleetPlan = p; save(); render();
+  };
+  const rb = $("#rebuildFleetBtn");
+  if (rb) rb.onclick = ()=>{
+    const p = readFleetPlanUI(); if (!p) return;
+    const total = (state.depots||[]).reduce((s,d)=> s + Object.values(p.counts[d.id]||{}).reduce((a,b)=>a+(+b||0),0), 0);
+    if (!confirm(`Rebuild the fleet as ${total} vehicles from this setup?\n\nDriver names reset to "to be assigned", but mobile numbers are kept where the same vehicle slot exists at the same hub. Existing routes stay until you re-run Plan Routes.`)) return;
+    rebuildFleet(p); save(); render();
+    alert(`Fleet rebuilt: ${total} vehicles. Now tap Plan Routes to rebuild the routes with the new fleet.`);
+  };
+}
+function readFleetPlanUI(){
+  const host = $("#fleetSetup"); if (!host) return null;
+  const caps = {}, counts = {};
+  host.querySelectorAll("[data-fcap]").forEach(inp=>{ caps[inp.dataset.fcap] = Math.max(1, Math.round(+inp.value || 1)); });
+  host.querySelectorAll("[data-fcount]").forEach(inp=>{
+    counts[inp.dataset.fcount] = counts[inp.dataset.fcount] || {};
+    counts[inp.dataset.fcount][inp.dataset.type] = Math.max(0, Math.round(+inp.value || 0));
+  });
+  return { caps, counts };
+}
+function rebuildFleet(plan){
+  const oldByKey = {};
+  const seen = {};
+  for (const v of state.vehicles){
+    const k = `${v.dispatchId}|${v.type}`;
+    seen[k] = (seen[k]||0) + 1;
+    oldByKey[`${k}|${seen[k]}`] = v;
+  }
+  const vehicles = []; let id = 1; const counters = {};
+  for (const dep of state.depots){
+    for (const t of Object.keys(plan.caps)){
+      const n = +((plan.counts[dep.id]||{})[t]||0);
+      for (let i=1; i<=n; i++){
+        counters[t] = (counters[t]||0) + 1;
+        const old = oldByKey[`${dep.id}|${t}|${i}`];
+        vehicles.push({ id: id++, label: `${t} ${String(counters[t]).padStart(2,"0")}`, type: t,
+          driver: old ? old.driver : "Driver — to be assigned",
+          capacityBottles: plan.caps[t], dispatchId: dep.id, phone: old ? (old.phone||"") : "" });
+      }
+    }
+  }
+  state.vehicles = vehicles;
+  state.fleetPlan = plan;
+  // Allocations from the old fleet may exceed the new based counts — clamp.
+  for (const dep of state.depots){
+    if (!dep.alloc) continue;
+    for (const t of Object.keys(dep.alloc)){
+      const homed = vehicles.filter(v=>v.dispatchId===dep.id && v.type===t).length;
+      dep.alloc[t] = Math.min(dep.alloc[t], homed);
+    }
+  }
+}
 function render(){
   // day tabs
   $("#dayTabs").innerHTML = DAYS.map(dy=>
@@ -673,6 +777,7 @@ function render(){
   if (afEl.options.length <= 1) afEl.innerHTML = `<option value="">All areas</option>` + areas().map(a=>`<option>${a}</option>`).join("");
   if (cfEl.options.length <= 1) cfEl.innerHTML = `<option value="">All areas</option>` + areas().map(a=>`<option>${a}</option>`).join("");
   const dl = $("#areaList"); if (dl && !dl.options.length) dl.innerHTML = areas().map(a=>`<option value="${a}">`).join("");
+  renderFleetSetup();
   $("#depotInfo").innerHTML = (state.depots||[]).map(dep=>{
     const nv = state.vehicles.filter(v=>v.dispatchId===dep.id).length;
     const nc = state.customers.filter(c=>c.dispatchId===dep.id).length;
@@ -695,7 +800,7 @@ function render(){
         <div class="dc-types">
           ${types.map(t=>{
             const homed = state.vehicles.filter(v=>v.dispatchId===dep.id && v.type===t).length;
-            const val = dep.alloc && dep.alloc[t] != null ? dep.alloc[t] : homed;
+            const val = Math.min(homed, dep.alloc && dep.alloc[t] != null ? dep.alloc[t] : homed);
             return `<div class="dc-typebox"><span>${t}</span><input type="number" min="0" max="${homed}" step="1" value="${val}" data-dep-alloc="${dep.id}" data-type="${t}" aria-label="${t} running from ${dep.name}"> <small>of ${homed} based</small></div>`;
           }).join("")}
         </div>
@@ -730,13 +835,17 @@ function render(){
   state.vehicles.forEach(v=>{ byType[v.type] = byType[v.type] || {n:0, cap:v.capacityBottles}; byType[v.type].n++; });
   $("#fleetList").innerHTML = Object.entries(byType).map(([t,x])=>`<p>🚚 <strong>${x.n} × ${t}</strong> — ${x.cap} bottles each</p>`).join("")
     + `<p><strong>Total fleet: ${state.vehicles.length} vehicles</strong> — add each driver's mobile on their vehicle row; the 📤 Send to driver buttons send that route to this number on WhatsApp.</p>`
-    + state.vehicles.map(v=>`<div class="stop"><span class="sp"><strong>${v.label}</strong> — ${v.driver} · ${v.capacityBottles} bottles · ${depotById(v.dispatchId)?.name||""}</span>
+    + state.vehicles.map(v=>`<div class="stop"><span class="sp"><strong>${v.label}</strong> — ${v.driver} · ${depotById(v.dispatchId)?.name||""}</span>
+      <label style="font-size:12px">Bottles <input data-veh-cap="${v.id}" type="number" min="1" step="1" value="${v.capacityBottles}" style="width:64px" aria-label="Bottle capacity for ${v.label}"></label>
       <input data-veh-phone="${v.id}" value="${v.phone||""}" placeholder="Driver mobile (03…)" aria-label="Driver mobile for ${v.label}" inputmode="tel">
       <button class="btn small primary" data-veh-phone-save="${v.id}">Save</button></div>`).join("");
   document.querySelectorAll("[data-veh-phone-save]").forEach(b=> b.onclick = ()=>{
     const v = vehById(+b.dataset.vehPhoneSave); if (!v) return;
     const inp = document.querySelector(`[data-veh-phone="${v.id}"]`);
     v.phone = normalisePhone(inp ? inp.value : ""); // digits only; wa.me link converts 03… -> 923…
+    const capInp = document.querySelector(`[data-veh-cap="${v.id}"]`);
+    if (capInp) v.capacityBottles = Math.max(1, Math.round(+capInp.value || v.capacityBottles));
+    state.routes.forEach(recalcRoute);
     save(); render();
   });
 }

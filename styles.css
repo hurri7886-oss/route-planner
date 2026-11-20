@@ -90,6 +90,10 @@ input[type=search],select{padding:8px;border:1px solid #c8d6e2;border-radius:8px
 .dc-typebox small{color:#607d8b}
 .dc-hint{color:#607d8b;display:block;margin-top:8px}
 .dc-foot{display:flex;justify-content:flex-end;margin-top:12px}
+.dc-hubrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 0;border-bottom:1px dashed #d7e0e6}
+.dc-hubrow:last-of-type{border-bottom:none}
+.dc-hubname{font-weight:700;color:#102a43;min-width:130px}
+.dc-hubrow label{font-size:12.5px;color:#334e68}
 .depot-pop{min-width:190px}
 .depot-pop .dp-edit{display:flex;flex-direction:column;gap:6px;align-items:stretch;margin-top:6px}
 .depot-pop .dp-edit label{display:flex;gap:6px;align-items:center;justify-content:space-between}
