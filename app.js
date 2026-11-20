@@ -23,6 +23,7 @@ function defaultFleetPlan(){
   // is editable in ⚙ Advanced → Fleet setup; "Rebuild fleet" applies it.
   return {
     caps: { "Mazda": 160, "Shehzore": 90, "Ravi / Pick-up": 60, "Bolan": 45, "FAW": 50 },
+    custPer: {},
     counts: {
       dp1: { "Mazda": 17, "Shehzore": 1, "FAW": 1 },              // Kamaha — 19
       dp2: { "Shehzore": 1, "Bolan": 1 },                          // DHA Water shop — 2
@@ -33,6 +34,12 @@ function defaultFleetPlan(){
   };
 }
 function fleetPlan(){ return state.fleetPlan || defaultFleetPlan(); }
+function custPerFor(type){
+  // Customers per vehicle for this type: per-type setting wins, else the
+  // global Customers-per-truck value.
+  const n = state.custPerType && +state.custPerType[type];
+  return n > 0 ? n : (state.perTruck || 90);
+}
 function depotPool(dep){
   // Vehicles that may run from this hub today: homed vehicles, capped per
   // type by the hub's allocation (dep.alloc = { "Mazda": n, ... }).
@@ -318,7 +325,7 @@ function planRoutes(){
     const ranked = fleetDeps.slice().sort((x,y)=> hav(c,x) - hav(c,y));
     let chosen = ranked[0];
     for (const d of ranked){
-      const cap = depotPool(d).length * state.perTruck * 1.25;
+      const cap = depotPool(d).reduce((s,v)=> s + custPerFor(v.type), 0) * 1.25;
       if (depLoad[d.id] < cap){ chosen = d; break; }
     }
     assign.set(c.id, chosen.id); depLoad[chosen.id]++;
@@ -329,16 +336,21 @@ function planRoutes(){
     if (!base0.length) continue;
     const fleet = depotPool(dep);
     if (!fleet.length) continue;
-    let nVeh = Math.max(1, Math.round(base0.length / state.perTruck));
-    nVeh = Math.min(nVeh, fleet.length);
-    while (nVeh < fleet.length && base0.length / nVeh > state.perTruck * 1.25) nVeh++;
+    // Use the fewest vehicles whose combined per-type customer capacity
+    // covers this hub's customers (Mazda may take 90, a Bolan fewer, etc.).
+    let nVeh = 0, covered = 0;
+    while (nVeh < fleet.length && covered < base0.length){ covered += custPerFor(fleet[nVeh].type); nVeh++; }
+    nVeh = Math.max(1, nVeh);
     const sorted = base0.slice().sort((a,b)=>
       Math.atan2(a.lng-dep.lng, a.lat-dep.lat) - Math.atan2(b.lng-dep.lng, b.lat-dep.lat));
-    const bases = Array.from({length:nVeh}, ()=>[]);
-    sorted.forEach((c,i)=>{
-      const chunk = Math.floor(i / Math.ceil(sorted.length / nVeh));
-      bases[Math.min(chunk, nVeh-1)].push(c);
-    });
+    // Split proportionally to each vehicle's customer capacity.
+    const totalCap = fleet.slice(0, nVeh).reduce((s,v)=> s + custPerFor(v.type), 0) || nVeh;
+    const bases = []; let idx = 0;
+    for (let vi = 0; vi < nVeh; vi++){
+      const q = vi === nVeh - 1 ? sorted.length - idx
+        : Math.round(sorted.length * custPerFor(fleet[vi].type) / totalCap);
+      bases.push(sorted.slice(idx, idx + q)); idx += q;
+    }
     bases.forEach((base, vi)=>{
       const veh = fleet[vi];
       for (const day of DAYS){
@@ -615,8 +627,8 @@ function renderFleetSetup(){
   host.innerHTML = `<div class="depot-card">
     <div class="dc-head"><div class="dc-title"><strong>🚚 Fleet setup</strong><br>
     <small>How many vehicles of each type are <strong>based</strong> at each hub, and what each type carries. Edit any number, then press <strong>Rebuild fleet</strong> to apply. Driver mobile numbers are kept where the same vehicle slot exists. Re-run Plan Routes afterwards.</small></div></div>
-    <div class="dc-fleet"><div class="dc-fleet-title">Capacity per vehicle type (19L bottles)</div>
-      <div class="dc-types">${types.map(t=>`<div class="dc-typebox"><span>${t}</span><input type="number" min="1" step="1" value="${plan.caps[t]}" data-fcap="${t}" aria-label="${t} capacity"> <small>bottles</small></div>`).join("")}
+    <div class="dc-fleet"><div class="dc-fleet-title">Per vehicle type — bottle capacity &amp; customers per vehicle</div>
+      <div class="dc-types">${types.map(t=>`<div class="dc-typebox"><span>${t}</span><input type="number" min="1" step="1" value="${plan.caps[t]}" data-fcap="${t}" aria-label="${t} capacity"> <small>bottles</small><br><input type="number" min="1" step="1" value="${(plan.custPer && plan.custPer[t]) || custPerFor(t)}" data-fcust="${t}" aria-label="Customers per ${t}" style="margin-top:4px"> <small>customers</small></div>`).join("")}
       <div class="dc-typebox"><span>＋ New type</span><input id="newTypeName" placeholder="Name" style="width:84px"> <input id="newTypeCap" type="number" placeholder="Cap" style="width:56px"> <button class="btn small ghost" id="addTypeBtn" type="button">Add</button></div></div>
     </div>
     <div class="dc-fleet"><div class="dc-fleet-title">Vehicles based at each hub</div>
@@ -655,13 +667,14 @@ function renderFleetSetup(){
 }
 function readFleetPlanUI(){
   const host = $("#fleetSetup"); if (!host) return null;
-  const caps = {}, counts = {};
+  const caps = {}, counts = {}, custPer = {};
   host.querySelectorAll("[data-fcap]").forEach(inp=>{ caps[inp.dataset.fcap] = Math.max(1, Math.round(+inp.value || 1)); });
+  host.querySelectorAll("[data-fcust]").forEach(inp=>{ custPer[inp.dataset.fcust] = Math.max(1, Math.round(+inp.value || 1)); });
   host.querySelectorAll("[data-fcount]").forEach(inp=>{
     counts[inp.dataset.fcount] = counts[inp.dataset.fcount] || {};
     counts[inp.dataset.fcount][inp.dataset.type] = Math.max(0, Math.round(+inp.value || 0));
   });
-  return { caps, counts };
+  return { caps, counts, custPer };
 }
 function rebuildFleet(plan){
   const oldByKey = {};
@@ -686,6 +699,7 @@ function rebuildFleet(plan){
   }
   state.vehicles = vehicles;
   state.fleetPlan = plan;
+  if (plan.custPer) state.custPerType = plan.custPer;
   // Allocations from the old fleet may exceed the new based counts — clamp.
   for (const dep of state.depots){
     if (!dep.alloc) continue;
