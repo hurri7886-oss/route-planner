@@ -1489,6 +1489,32 @@ function exportCsv(){
     [c.id,c.name,c.area,c.address,c.lat,c.lng,c.bottlesPerDrop,c.deliveryDays,c.phone||"",c.serveThisWeek,""].map(csvCell).join(",")));
   download(lines.join("\n"), "customers.csv", "text/csv");
 }
+function exportRoutesCsv(){
+  // The full plan as data: one row per stop, all six days, in visit order.
+  // Opens in Excel — one sheet the office can sort, filter and share.
+  const routes = state.routes || [];
+  if (!routes.length){ alert("No routes to export yet — tap Plan Routes first."); return; }
+  const head = ["Day","Route","Hub","Vehicle","Driver","Driver phone","Stop","Customer ID","Customer","Area","Address","Phone","Bottles","Est. time","Route km","Route bottles"];
+  const lines = [head.join(",")];
+  const START = 8*60; // routes leave at 8:00 AM (same estimate as the Timeline)
+  for (const day of DAYS){
+    const dr = routes.filter(r=>r.day===day)
+      .sort((a,b)=> (depotById(a.dispatchId)?.name||"").localeCompare(depotById(b.dispatchId)?.name||"") || (vehById(a.vehicleId)?.label||"").localeCompare(vehById(b.vehicleId)?.label||""));
+    dr.forEach((r, ri)=>{
+      const veh = vehById(r.vehicleId), dep = depotById(r.dispatchId);
+      const stops = r.stopIds.map(custById).filter(Boolean);
+      const seg = r.mins / Math.max(1, stops.length);
+      stops.forEach((c, j)=>{
+        lines.push([day, ri+1, dep?.name||"", veh?.label||"", veh?.driver||"", veh?.phone||"", j+1, c.id, c.name, c.area||"", c.address||"", c.phone||"", +c.bottlesPerDrop||0, fmtClock(START + seg*j), r.km, r.bottles].map(csvCell).join(","));
+      });
+    });
+    (state.unassigned?.[day] || []).forEach(id=>{
+      const c = custById(id); if (!c) return;
+      lines.push([day, "", "", "UNASSIGNED", "", "", "", c.id, c.name, c.area||"", c.address||"", c.phone||"", +c.bottlesPerDrop||0, "", "", ""].map(csvCell).join(","));
+    });
+  }
+  download(lines.join("\n"), "planned-routes.csv", "text/csv");
+}
 function download(text, name, type){
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click();
@@ -1817,6 +1843,7 @@ function wire(){
     window.scrollTo(0,0);
   };
   $("#exportCsvBtn").onclick = exportCsv;
+  const erb = $("#exportRoutesBtn"); if (erb) erb.onclick = exportRoutesCsv;
   const tplBtn = $("#templateCsvBtn"); if (tplBtn) tplBtn.onclick = downloadTemplate;
   $("#exportJsonBtn").onclick = ()=> download(JSON.stringify(state, null, 2), "route-planner-backup.json", "application/json");
   $("#importCsvInput").onchange = e=>{ if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ""; };
