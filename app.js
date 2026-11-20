@@ -275,7 +275,11 @@ function planRoutes(){
   // (straight-line distance). If that point's fleet is already full
   // (fleet x per-truck x 1.25), overflow to the next nearest. Vehicles stay
   // homed at their own dispatch point; routes start and end there.
-  const fleetDeps = state.depots.filter(d => state.vehicles.some(v=>v.dispatchId===d.id));
+  const fleetDeps = state.depots.filter(d => d.enabled !== false && state.vehicles.some(v=>v.dispatchId===d.id));
+  if (!fleetDeps.length){
+    alert("No dispatch point is available: every location is disabled or has no vehicles. Enable at least one location in ⚙ Advanced → Dispatch points.");
+    return;
+  }
   const assign = new Map(), depLoad = {};
   fleetDeps.forEach(d => depLoad[d.id] = 0);
   const byNearest = serving.slice().sort((a,b)=>{
@@ -659,14 +663,24 @@ function render(){
   $("#depotInfo").innerHTML = (state.depots||[]).map(dep=>{
     const nv = state.vehicles.filter(v=>v.dispatchId===dep.id).length;
     const nc = state.customers.filter(c=>c.dispatchId===dep.id).length;
-    return `<div class="stop"><span class="sp"><strong>${dep.name}</strong> (${dep.type}) — ${dep.area} · ${nc} customers · ${nv} vehicles<br>
+    const off = dep.enabled === false;
+    return `<div class="stop"><span class="sp"><strong>${dep.name}</strong> (${dep.type}) — ${dep.area} · ${nc} customers · ${nv} vehicles ${off ? '· <strong style="color:#c0392b">DISABLED</strong>' : ''}<br>
       <small>${dep.address}</small></span>
       <input data-dep-name="${dep.id}" value="${dep.name}" aria-label="Dispatch point name">
       <input data-dep-address="${dep.id}" value="${dep.address || ""}" placeholder="Full street address" aria-label="Dispatch point address" style="width:220px">
       <input data-dep-lat="${dep.id}" type="number" step="any" value="${dep.lat}" aria-label="Latitude" style="width:100px">
       <input data-dep-lng="${dep.id}" type="number" step="any" value="${dep.lng}" aria-label="Longitude" style="width:100px">
-      <button class="btn small primary" data-dep-save="${dep.id}">Save</button></div>`;
+      <button class="btn small primary" data-dep-save="${dep.id}">Save</button>
+      <button class="btn small ${off ? 'teal' : 'ghost'}" data-dep-toggle="${dep.id}">${off ? '▶ Enable' : '⏸ Disable'}</button></div>`;
   }).join("");
+  document.querySelectorAll("[data-dep-toggle]").forEach(b=> b.onclick = ()=>{
+    const dep = depotById(b.dataset.depToggle); if (!dep) return;
+    dep.enabled = dep.enabled === false ? true : false;
+    save(); render();
+    alert(dep.enabled
+      ? `${dep.name} is ENABLED. Tap Plan Routes to rebuild — its vehicles will be used again.`
+      : `${dep.name} is DISABLED. Tap Plan Routes to rebuild — its customers will be served from the nearest enabled location and its vehicles will stay parked.`);
+  });
   document.querySelectorAll("[data-dep-save]").forEach(b=> b.onclick = ()=>{
     const dep = depotById(b.dataset.depSave); if (!dep) return;
     dep.name = document.querySelector(`[data-dep-name="${dep.id}"]`).value || dep.name;
@@ -834,7 +848,7 @@ function updateDepotDetails(depId, name, address, lat, lng){
 function buildDepotPopup(dep){
   const el = document.createElement("div");
   el.className = "depot-pop";
-  el.innerHTML = `<strong>${dep.name}</strong> (${dep.type})<br>${dep.area || ""}` +
+  el.innerHTML = `<strong>${dep.name}</strong> (${dep.type})${dep.enabled===false ? ' · <strong style="color:#c0392b">DISABLED</strong>' : ''}<br>${dep.area || ""}` +
     (dep.address ? `<br><small>${dep.address}</small>` : "") +
     `<br><small>Drag this pin to move the dispatch point.</small>` +
     `<div class="dp-edit"><label>Rename <input class="dp-name-input" value="${dep.name}" aria-label="Dispatch point name"></label>` +
@@ -898,7 +912,7 @@ function renderMap(dr){
 function drawLeaflet(dr){
   const sig = JSON.stringify([selectedDay, selectedRouteId, mapFocus,
     dr.map(r=>r.id+":"+r.stopIds.join(",")),
-    (state.depots||[]).map(d=>d.id+":"+d.name+":"+d.address+":"+d.lat+","+d.lng),
+    (state.depots||[]).map(d=>d.id+":"+d.name+":"+d.address+":"+d.lat+","+d.lng+":"+(d.enabled===false?"off":"on")),
     unassignedList(selectedDay)]);
   if (sig === lastMapSig){ if (lmap) lmap.invalidateSize(); return; }
   lastMapSig = sig;
@@ -906,7 +920,7 @@ function drawLeaflet(dr){
   const allPts = [];
   (state.depots||[]).forEach(dep=>{
     const mk = L.marker([dep.lat, dep.lng], { draggable: true,
-      icon: L.divIcon({ className: "", html: `<div class="depot-pin">D</div>`, iconSize: [24,24], iconAnchor: [12,12] }) });
+      icon: L.divIcon({ className: "", html: `<div class="depot-pin${dep.enabled===false ? " disabled" : ""}">D</div>`, iconSize: [24,24], iconAnchor: [12,12] }) });
     mk.bindTooltip(dep.name, { direction: "top", offset: [0,-14] });
     const popEl = buildDepotPopup(dep);
     mk.bindPopup(popEl);
