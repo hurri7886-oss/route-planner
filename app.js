@@ -1524,6 +1524,7 @@ function importCsv(file){
         phone: ix("phone")>=0 ? (r[ix("phone")] || "") : "",
         serveThisWeek: ix("serveThisWeek")>=0 ? /^(true|1|yes)$/i.test(r[ix("serveThisWeek")]) : true,
       };
+      if (rec.lat >= 60 && rec.lat <= 80 && rec.lng >= 20 && rec.lng <= 40){ const t = rec.lat; rec.lat = rec.lng; rec.lng = t; } // lat/lng columns swapped in the sheet -> fix
       if (rec.lat && rec.lng && !inLahore(rec.lat, rec.lng)){ rec.lat = 0; rec.lng = 0; } // garbled/outside coords -> treat as missing, never as a real pin
       const ex = custById(rec.id);
       if (ex){ Object.assign(ex, rec); updated++; } else { state.customers.push(rec); added++; }
@@ -1781,6 +1782,14 @@ async function boot(){
   if (Array.isArray(state.vehicles)) state.vehicles.forEach(v=>{ if (typeof v.phone !== "string") v.phone = ""; }); // driver mobile (older states have none)
   if (!state.unassigned || typeof state.unassigned !== "object" || Array.isArray(state.unassigned)) state.unassigned = {};
   if (!Array.isArray(state.depots) || !state.depots.length){ localStorage.removeItem(LS_KEY); await seed(); }
+  // Heal swapped lat/lng in existing data: Lahore pins read lat~31, lng~74;
+  // a sheet with the two columns swapped stores lat~74, lng~31, which plots
+  // near the Arctic and stretches routes across the world map.
+  let healed = 0;
+  (state.customers||[]).forEach(c=>{
+    if (c.lat >= 60 && c.lat <= 80 && c.lng >= 20 && c.lng <= 40){ const t = c.lat; c.lat = c.lng; c.lng = t; healed++; }
+  });
+  if (healed) save();
   wire(); render(); updateSyncStatus();
 }
 (async function init(){
