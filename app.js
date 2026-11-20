@@ -18,6 +18,19 @@ const $ = s => document.querySelector(s);
 const custById = id => state.customers.find(c => c.id === id);
 const vehById = id => state.vehicles.find(v => v.id === id);
 const depotById = id => (state.depots||[]).find(d => d.id === id) || (state.depots||[])[0];
+function depotPool(dep){
+  // Vehicles that may run from this hub today: homed vehicles, capped per
+  // type by the hub's allocation (dep.alloc = { "Mazda": n, ... }).
+  const fleet = state.vehicles.filter(v=>v.dispatchId===dep.id);
+  if (!dep.alloc) return fleet;
+  const used = {}, pool = [];
+  for (const v of fleet){
+    const cap = dep.alloc[v.type];
+    used[v.type] = used[v.type] || 0;
+    if (cap == null || used[v.type] < cap){ pool.push(v); used[v.type]++; }
+  }
+  return pool;
+}
 const routeDepot = r => depotById(r.dispatchId || custById(r.stopIds[0])?.dispatchId);
 
 function save(){ cacheLocal(); queueSbSave(); }
@@ -275,7 +288,7 @@ function planRoutes(){
   // (straight-line distance). If that point's fleet is already full
   // (fleet x per-truck x 1.25), overflow to the next nearest. Vehicles stay
   // homed at their own dispatch point; routes start and end there.
-  const fleetDeps = state.depots.filter(d => d.enabled !== false && state.vehicles.some(v=>v.dispatchId===d.id));
+  const fleetDeps = state.depots.filter(d => d.enabled !== false && depotPool(d).length > 0);
   if (!fleetDeps.length){
     alert("No dispatch point is available: every location is disabled or has no vehicles. Enable at least one location in ⚙ Advanced → Dispatch points.");
     return;
@@ -290,7 +303,7 @@ function planRoutes(){
     const ranked = fleetDeps.slice().sort((x,y)=> hav(c,x) - hav(c,y));
     let chosen = ranked[0];
     for (const d of ranked){
-      const cap = state.vehicles.filter(v=>v.dispatchId===d.id).length * state.perTruck * 1.25;
+      const cap = depotPool(d).length * state.perTruck * 1.25;
       if (depLoad[d.id] < cap){ chosen = d; break; }
     }
     assign.set(c.id, chosen.id); depLoad[chosen.id]++;
@@ -299,7 +312,7 @@ function planRoutes(){
   for (const dep of state.depots){
     const base0 = serving.filter(c => assign.get(c.id) === dep.id);
     if (!base0.length) continue;
-    const fleet = state.vehicles.filter(v => v.dispatchId === dep.id);
+    const fleet = depotPool(dep);
     if (!fleet.length) continue;
     let nVeh = Math.max(1, Math.round(base0.length / state.perTruck));
     nVeh = Math.min(nVeh, fleet.length);
@@ -671,7 +684,15 @@ function render(){
       <input data-dep-lat="${dep.id}" type="number" step="any" value="${dep.lat}" aria-label="Latitude" style="width:100px">
       <input data-dep-lng="${dep.id}" type="number" step="any" value="${dep.lng}" aria-label="Longitude" style="width:100px">
       <button class="btn small primary" data-dep-save="${dep.id}">Save</button>
-      <button class="btn small ${off ? 'teal' : 'ghost'}" data-dep-toggle="${dep.id}">${off ? '▶ Enable' : '⏸ Disable'}</button></div>`;
+      <button class="btn small ${off ? 'teal' : 'ghost'}" data-dep-toggle="${dep.id}">${off ? '▶ Enable' : '⏸ Disable'}</button>
+      <span style="flex-basis:100%"></span>
+      <small style="align-self:center"><strong>Vehicles running from this hub:</strong></small>
+      ${[...new Set(state.vehicles.filter(v=>v.dispatchId===dep.id).map(v=>v.type))].map(t=>{
+        const homed = state.vehicles.filter(v=>v.dispatchId===dep.id && v.type===t).length;
+        const val = dep.alloc && dep.alloc[t] != null ? dep.alloc[t] : homed;
+        return `<label style="font-size:12.5px">${t}: <input type="number" min="0" max="${homed}" step="1" value="${val}" data-dep-alloc="${dep.id}" data-type="${t}" style="width:56px" aria-label="${t} running from ${dep.name}"> <span style="color:#607d8b">of ${homed}</span></label>`;
+      }).join("")}
+      <small style="color:#607d8b">Set 0 to keep all of that type parked. Takes effect on Save → Plan Routes.</small></div>`;
   }).join("");
   document.querySelectorAll("[data-dep-toggle]").forEach(b=> b.onclick = ()=>{
     const dep = depotById(b.dataset.depToggle); if (!dep) return;
@@ -687,6 +708,12 @@ function render(){
     const addrEl = document.querySelector(`[data-dep-address="${dep.id}"]`); if (addrEl) dep.address = addrEl.value.trim();
     dep.lat = +document.querySelector(`[data-dep-lat="${dep.id}"]`).value || dep.lat;
     dep.lng = +document.querySelector(`[data-dep-lng="${dep.id}"]`).value || dep.lng;
+    const alloc = {};
+    document.querySelectorAll(`[data-dep-alloc="${dep.id}"]`).forEach(inp=>{
+      const homed = state.vehicles.filter(v=>v.dispatchId===dep.id && v.type===inp.dataset.type).length;
+      alloc[inp.dataset.type] = Math.max(0, Math.min(homed, Math.round(+inp.value || 0)));
+    });
+    if (Object.keys(alloc).length) dep.alloc = alloc;
     state.routes.forEach(recalcRoute); save(); render(); alert("Dispatch point saved. Re-run Plan Routes to rebuild from the new location.");
   });
   const byType = {};
