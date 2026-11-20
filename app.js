@@ -8,12 +8,15 @@
    an offline cache / backup. Config in config.js (publishable key —
    public-safe by design; access is controlled by login + RLS). */
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat"];
-const COLORS = ["#0b84c6","#e53935","#009688","#fb8c00","#8e24aa","#3949ab","#00897b","#d81b60"];
+const COLORS = ["#0b84c6","#e53935","#009688","#fb8c00","#8e24aa","#3949ab","#00897b","#d81b60",
+  "#6d4c41","#00acc1","#7cb342","#fdd835","#5e35b1","#039be5","#43a047","#f4511e",
+  "#1e88e5","#c0ca33","#fb8c00","#757575","#26a69a","#ab47bc","#ef5350","#66bb6a"];
 const LS_KEY = "route-planner-v2"; // v2: multi-dispatch + real fleet (71 vehicles)
 let state = null;          // {customers, vehicles, depots, perTruck, routes}
 let selectedDay = "Mon";
 let selectedRouteId = null;
 let hubFilter = null; // depot id: route list shows only this hub (null = all hubs)
+const hiddenRoutes = new Set(); // route ids toggled OFF in the map route picker
 
 const $ = s => document.querySelector(s);
 const custById = id => state.customers.find(c => c.id === id);
@@ -745,7 +748,7 @@ function render(){
   $("#dayTabs").innerHTML = DAYS.map(dy=>
     `<button data-day="${dy}" class="${dy===selectedDay?'active':''}">${dy}</button>`).join("");
   document.querySelectorAll("#dayTabs button").forEach(b=> b.onclick = ()=>{ selectedDay=b.dataset.day;
-    selectedRouteId = dayRoutes()[0]?.id || null; mapFocus = "ALL"; render(); });
+    selectedRouteId = dayRoutes()[0]?.id || null; mapFocus = "ALL"; hiddenRoutes.clear(); render(); });
 
   const serving = state.customers.filter(c=>c.serveThisWeek);
   const dr = dayRoutes();
@@ -802,6 +805,25 @@ function render(){
       return `<button class="chip hub-chip ${hubFilter===dep.id?'on':''}" data-hub-filter="${dep.id}">${dep.name}: <strong>${t.n} routes</strong> · ${t.cust} customers · ${t.bottles} bottles</button>`;
     }).join("") : "";
   document.querySelectorAll("[data-hub-filter]").forEach(b=> b.onclick = ()=>{ hubFilter = b.dataset.hubFilter || null; render(); });
+  // map route picker: show all, hide all, or toggle individual routes
+  const picker = $("#routePicker");
+  if (picker){
+    picker.innerHTML = dr.length ? `<span style="font-weight:700;color:#102a43;align-self:center">🗺 Show on map:</span>
+      <button class="btn small teal" data-vis-all type="button">All routes</button>
+      <button class="btn small ghost" data-vis-none type="button">None</button>` +
+      dr.map(r=>{
+        const veh = vehById(r.vehicleId);
+        const off = hiddenRoutes.has(r.id);
+        return `<button class="chip route-chip ${off?'off':''}" data-vis-route="${r.id}" type="button" title="${off?'Hidden — tap to show':'Shown — tap to hide'}"><span class="dot" style="background:${COLORS[colorIdx[r.id]%COLORS.length]}"></span>${veh?.label||"Route"} · ${depotById(r.dispatchId)?.name||""}</button>`;
+      }).join("") : "";
+    const allB = picker.querySelector("[data-vis-all]"); if (allB) allB.onclick = ()=>{ hiddenRoutes.clear(); render(); };
+    const noneB = picker.querySelector("[data-vis-none]"); if (noneB) noneB.onclick = ()=>{ dr.forEach(r=> hiddenRoutes.add(r.id)); render(); };
+    picker.querySelectorAll("[data-vis-route]").forEach(b=> b.onclick = ()=>{
+      const id = b.dataset.visRoute;
+      if (hiddenRoutes.has(id)) hiddenRoutes.delete(id); else hiddenRoutes.add(id);
+      render();
+    });
+  }
   let visible = dr.filter(r=>{
     const veh = vehById(r.vehicleId);
     const txt = (veh?.label||"") + " " + (veh?.driver||"") + " " + r.stopIds.map(id=>{const c=custById(id); return c? c.name+" "+c.area : "";}).join(" ");
@@ -833,7 +855,7 @@ function render(){
     const bot = rs.reduce((s,r)=>s+r.bottles,0), kmT = Math.round(rs.reduce((s,r)=>s+r.km,0)*10)/10;
     return `<div class="hub-group-head">${dep?.name||"Hub"} — ${rs.length} route${rs.length>1?"s":""} · ${cust} customers · ${bot} bottles · ${kmT} km</div>` + rs.map(cardHtml).join("");
   }).join("") || `<p class="hint">No routes for ${selectedDay} yet — tick customers above and tap Plan Routes.</p>`;
-  document.querySelectorAll(".route-card").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.route; mapFocus = el.dataset.route; render(); });
+  document.querySelectorAll(".route-card").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.route; mapFocus = el.dataset.route; hiddenRoutes.delete(el.dataset.route); render(); });
   renderTimeline(visible);
 
   renderMap(dr);
@@ -948,14 +970,14 @@ function renderTimeline(dr){
   const START = 8*60; // routes leave the dispatch point at 8:00 AM (estimate)
   wrap.innerHTML = dr.map((r,i)=>{
     const veh = vehById(r.vehicleId);
-    const color = COLORS[i % COLORS.length];
+    const color = COLORS[routeColorIdx(r.id) % COLORS.length];
     const loadPct = veh && veh.capacityBottles ? Math.round(r.bottles / veh.capacityBottles * 100) : 0;
     const over = loadPct > 100;
     const n = Math.max(1, r.stopIds.length);
     const seg = r.mins / n;
     const blocks = r.stopIds.map((id,j)=>`<span class="tl-block" style="background:${color}" title="${j+1}. ${(custById(id)||{}).name||""} · ~${fmtClock(START + seg*j)}">${j+1}</span>`).join("");
     return `<div class="tl-row ${r.id===selectedRouteId?'selected':''}" data-tlroute="${r.id}">
-      <div class="tl-meta"><span class="tl-tag" style="background:${color}">Route ${i+1}</span>
+      <div class="tl-meta"><span class="tl-tag" style="background:${color}">Route ${routeColorIdx(r.id)+1}</span>
         <b>${veh?.label||"Vehicle"}</b> <span class="tl-sub">${veh?.driver||""}</span>
         <div class="tl-nums">${r.stopIds.length} stops · ${r.km} km · <span class="${over?'over':''}">${loadPct}% full</span></div></div>
       <div class="tl-barwrap"><div class="tl-times"><span>${fmtClock(START)}</span><span>~${r.mins} min</span><span>${fmtClock(START + r.mins)}</span></div>
@@ -964,7 +986,12 @@ function renderTimeline(dr){
   }).join("") || `<p class="hint">No routes for ${selectedDay} yet — tap Plan Routes.</p>`;
   wrap.querySelectorAll("[data-tlroute]").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.tlroute; mapFocus = el.dataset.tlroute; render(); });
 }
+function routeColorIdx(routeId){
+  const i = dayRoutes().findIndex(r=>r.id===routeId);
+  return i < 0 ? 0 : i;
+}
 function renderPlotSvg(dr){
+  dr = dr.filter(r=> !hiddenRoutes.has(r.id));
   const svg = $("#plot");
   const all = state.customers; if (!all.length){ svg.innerHTML=""; return; }
   const pts = [...(state.depots||[]), ...all];
@@ -974,13 +1001,14 @@ function renderPlotSvg(dr){
   const X = lng => pad + (lng-minLng)/((maxLng-minLng)||1)*(W-2*pad);
   const Y = lat => H-pad - (lat-minLat)/((maxLat-minLat)||1)*(H-2*pad);
   let s = "";
-  dr.forEach((r,i)=>{
+  dr.forEach((r)=>{
+    const ci = routeColorIdx(r.id);
     const stops = r.stopIds.map(custById).filter(Boolean);
     const dep = routeDepot(r); const line = [dep, ...stops, dep].map(c=>`${X(c.lng)},${Y(c.lat)}`).join(" ");
-    s += `<polyline points="${line}" fill="none" stroke="${COLORS[i%COLORS.length]}" stroke-width="${r.id===selectedRouteId?3:1.5}" stroke-dasharray="5 4" opacity="0.8"/>`;
+    s += `<polyline points="${line}" fill="none" stroke="${COLORS[ci%COLORS.length]}" stroke-width="${r.id===selectedRouteId?3:1.5}" stroke-dasharray="5 4" opacity="0.8"/>`;
     stops.forEach((c,j)=>{
       s += `<g class="pin" data-pin="${c.id}" data-route="${r.id}" style="cursor:pointer">
-        <circle cx="${X(c.lng)}" cy="${Y(c.lat)}" r="10" fill="${COLORS[i%COLORS.length]}"/>
+        <circle cx="${X(c.lng)}" cy="${Y(c.lat)}" r="10" fill="${COLORS[ci%COLORS.length]}"/>
         <text x="${X(c.lng)}" y="${Y(c.lat)+3.5}" text-anchor="middle" font-size="9" fill="#fff" font-weight="700">${j+1}</text></g>`;
     });
   });
@@ -1125,7 +1153,8 @@ function renderMap(dr){
   }
 }
 function drawLeaflet(dr){
-  const sig = JSON.stringify([selectedDay, selectedRouteId, mapFocus,
+  dr = dr.filter(r=> !hiddenRoutes.has(r.id)); // map route picker: hidden routes are not drawn
+  const sig = JSON.stringify([selectedDay, selectedRouteId, mapFocus, [...hiddenRoutes].join(","),
     dr.map(r=>r.id+":"+r.stopIds.join(",")),
     (state.depots||[]).map(d=>d.id+":"+d.name+":"+d.address+":"+d.lat+","+d.lng+":"+(d.enabled===false?"off":"on")),
     unassignedList(selectedDay)]);
@@ -1162,8 +1191,8 @@ function drawLeaflet(dr){
     mk.addTo(lmapLayer);
     allPts.push([dLat, dLng]);
   });
-  dr.forEach((r,i)=>{
-    const color = COLORS[i % COLORS.length];
+  dr.forEach((r)=>{
+    const color = COLORS[routeColorIdx(r.id) % COLORS.length];
     const stops = r.stopIds.map(custById).filter(Boolean);
     const dep = routeDepot(r);
     const pts = [[dep.lat, dep.lng], ...stops.map(c=>[c.lat, c.lng]), [dep.lat, dep.lng]];

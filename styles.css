@@ -48,7 +48,10 @@ body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;b
 .badge{background:#eef3f7;border-radius:99px;padding:3px 10px;font-size:12px;color:#47617a}
 input[type=search],select{padding:8px;border:1px solid #c8d6e2;border-radius:8px;flex:1;min-width:120px}
 .view-toggle{margin-left:auto;display:flex;gap:6px}
-.tl-row{display:grid;grid-template-columns:150px 1fr;gap:10px;border:1px solid #e1ebf2;border-radius:12px;padding:9px 10px;margin:8px 0;cursor:pointer;background:#fff;align-items:center}
+.tl-row{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;border:1px solid #e1ebf2;border-radius:12px;padding:9px 10px;margin:8px 0;cursor:pointer;background:#fff;align-items:center}
+.route-chip{cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.route-chip .dot{width:11px;height:11px;border-radius:50%;display:inline-block;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.2)}
+.route-chip.off{opacity:.42;text-decoration:line-through}
 .tl-row.selected{outline:2px solid #0b84c6}
 .tl-tag{display:inline-block;color:#fff;font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;margin-bottom:3px}
 .tl-meta b{font-size:13px;display:block}
@@ -56,8 +59,9 @@ input[type=search],select{padding:8px;border:1px solid #c8d6e2;border-radius:8px
 .tl-nums{font-size:12px;color:#47617a;margin-top:2px}
 .tl-nums .over{color:#d35400;font-weight:800}
 .tl-times{display:flex;justify-content:space-between;font-size:11px;color:#6b7f92;margin-bottom:3px}
-.tl-bar{display:flex;gap:2px}
-.tl-block{flex:1;min-width:14px;text-align:center;color:#fff;font-size:10px;font-weight:700;border-radius:3px;padding:3px 0;opacity:.92;overflow:hidden}
+.tl-bar{display:flex;gap:2px;flex-wrap:wrap}
+.tl-barwrap{min-width:0}
+.tl-block{flex:0 0 auto;min-width:15px;text-align:center;color:#fff;font-size:10px;font-weight:700;border-radius:3px;padding:3px 2px;opacity:.92;overflow:hidden}
 .route-card{border:1px solid #e1ebf2;border-left:6px solid #999;border-radius:12px;padding:10px 12px;margin:10px 0;cursor:pointer;background:#fff}
 .route-card.selected{outline:2px solid #0b84c6}
 .route-card h3{margin:0 0 2px;font-size:14px}
