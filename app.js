@@ -396,13 +396,86 @@ function planRoutes(){
       }
     });
   }
+  const tidied = tidyRoutes(routes);
   state.routes = routes;
   state.unassigned = {}; // a fresh plan puts everyone back on routes — pool empties
   selectedRouteId = routes.find(r=>r.day===selectedDay)?.id || routes[0]?.id || null;
   mapFocus = "ALL";
   save(); render();
   if (badCoord.length) alert(`⚠ ${badCoord.length} ticked customer(s) were LEFT OUT because their coordinates are missing or outside Lahore. Fix them with ⚙ Advanced → 📍 Fill missing coordinates, then tap Plan Routes again.`);
-  if (prevUnassigned) alert(`Plan Routes done: ${routes.length} routes built. ${prevUnassigned} unassigned customer(s) were put back onto routes.`);
+  const bits = [];
+  if (prevUnassigned) bits.push(`${prevUnassigned} unassigned customer(s) were put back onto routes.`);
+  if (tidied) bits.push(`🧠 Smart tidy moved ${tidied} far-away stop(s) onto nearer routes — no lone stop dragging a vehicle across the map.`);
+  if (bits.length) alert(`Plan Routes done: ${routes.length} routes built. ` + bits.join(" "));
+}
+
+/* ---------- smart tidy: keep lone far-away stops off clustered routes ----------
+   One stop sitting far from its route-mates forces the vehicle to drive out
+   and back for a single bottle — fuel and time. After the first plan, check
+   every stop: if taking it out of its route saves a big detour and another
+   route the same day can absorb it for much less (and has bottle room),
+   move it there at the cheapest insertion point. Automatic in Plan Routes. */
+function tidyRoutes(routes){
+  const byDay = {};
+  routes.forEach(r=>{ (byDay[r.day] = byDay[r.day] || []).push(r); });
+  const moved = new Set();
+  let totalMoves = 0;
+  for (const day of Object.keys(byDay)){
+    const dayRoutes = byDay[day].filter(r=> r.stopIds.length);
+    if (dayRoutes.length < 2) continue;
+    for (let pass = 0; pass < 3; pass++){
+      let movedThisPass = false;
+      const cents = new Map(dayRoutes.map(r=>{
+        const ss = r.stopIds.map(custById).filter(Boolean);
+        return [r.id, ss.length ? { lat: ss.reduce((s,c)=>s+c.lat,0)/ss.length, lng: ss.reduce((s,c)=>s+c.lng,0)/ss.length } : null];
+      }));
+      for (const r of dayRoutes){
+        if (!r.stopIds.length) continue;
+        const dep = routeDepot(r);
+        const stops = r.stopIds.map(custById).filter(Boolean);
+        for (let i = stops.length - 1; i >= 0; i--){
+          const c = stops[i];
+          if (moved.has(c.id + ":" + day)) continue;
+          const prev = i > 0 ? stops[i-1] : dep, next = i < stops.length - 1 ? stops[i+1] : dep;
+          const saving = hav(prev, c) + hav(c, next) - hav(prev, next); // detour this stop adds to its own route
+          if (saving < 2) continue; // not an outlier here — leave it alone
+          let best = null;
+          for (const s of dayRoutes){
+            if (s === r || !s.stopIds.length) continue;
+            const veh = vehById(s.vehicleId);
+            if (veh && veh.capacityBottles && s.bottles + (+c.bottlesPerDrop||0) > veh.capacityBottles) continue;
+            const sDep = routeDepot(s);
+            const sStops = s.stopIds.map(custById).filter(Boolean);
+            // Candidate if the route's cluster is near the stop OR the route
+            // actually passes near it (a stretched route's centre can be far
+            // away even when its line runs right past the stop).
+            const cen = cents.get(s.id);
+            const minStop = sStops.reduce((m,o)=> Math.min(m, hav(c, o)), 1e18);
+            if (minStop > 6 && (!cen || hav(c, cen) > 8)) continue;
+            let bCost = 1e18, bPos = -1;
+            for (let j = 0; j <= sStops.length; j++){
+              const a = j > 0 ? sStops[j-1] : sDep, b = j < sStops.length ? sStops[j] : sDep;
+              const cost = hav(a, c) + hav(c, b) - hav(a, b);
+              if (cost < bCost){ bCost = cost; bPos = j; }
+            }
+            if (!best || bCost < best.cost) best = { route: s, cost: bCost, pos: bPos };
+          }
+          if (best && saving - best.cost >= 1.5){ // only move when it saves real distance
+            r.stopIds.splice(r.stopIds.indexOf(c.id), 1);
+            best.route.stopIds.splice(best.pos, 0, c.id);
+            recalcRoute(r); recalcRoute(best.route);
+            stops.splice(i, 1);
+            moved.add(c.id + ":" + day); totalMoves++; movedThisPass = true;
+            const cen = cents.get(best.route.id);
+            if (cen){ const n = best.route.stopIds.length; cen.lat += (c.lat - cen.lat)/n; cen.lng += (c.lng - cen.lng)/n; }
+          }
+        }
+      }
+      if (!movedThisPass) break;
+    }
+  }
+  for (let i = routes.length - 1; i >= 0; i--) if (!routes[i].stopIds.length) routes.splice(i, 1);
+  return totalMoves;
 }
 
 /* ---------- stop move / reorder / unassigned pool ----------
