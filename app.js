@@ -13,6 +13,7 @@ const LS_KEY = "route-planner-v2"; // v2: multi-dispatch + real fleet (71 vehicl
 let state = null;          // {customers, vehicles, depots, perTruck, routes}
 let selectedDay = "Mon";
 let selectedRouteId = null;
+let hubFilter = null; // depot id: route list shows only this hub (null = all hubs)
 
 const $ = s => document.querySelector(s);
 const custById = id => state.customers.find(c => c.id === id);
@@ -752,7 +753,7 @@ function render(){
     [dayCustIds.size, `Customers served · ${serving.length} ticked this week · ${state.customers.length} total`],
     [`${Math.round(km*10)/10} km`, "Total km"],
     [bottles, "Total bottles"],
-    [vehUsed, `Vehicles used · ${state.vehicles.length} in fleet (55 Mazda · 6 Shehzore · 10 Ravi)`],
+    [vehUsed, `Vehicles used · ${state.vehicles.length} in fleet (${[...new Set(state.vehicles.map(v=>v.type))].map(t=>`${state.vehicles.filter(v=>v.type===t).length} ${t}`).join(" · ")})`],
     [serving.length && vehUsed ? Math.round(baseAssign.size/Math.max(1,new Set(state.routes.map(r=>r.vehicleId)).size)) : 0,
      `Avg customers / vehicle · target ~${state.perTruck} · ${(state.depots||[]).length} dispatch points`],
   ].map(([v,l])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
@@ -779,16 +780,31 @@ function render(){
   document.querySelectorAll("[data-area-skip]").forEach(b=> b.onclick = ()=> setAreaServe(b.dataset.areaSkip, false));
   renderCustomerList();
 
-  // route cards
+  // route cards — grouped by hub, with a per-hub summary on top
   $("#routesDayLabel").textContent = selectedDay;
   $("#routeCountBadge").textContent = `${dr.length} routes`;
   const q = ($("#routeSearch").value||"").toLowerCase();
   const af = $("#routeAreaFilter").value || "";
-  $("#routeCards").innerHTML = dr.filter(r=>{
+  const colorIdx = {}; dr.forEach((r,i)=> colorIdx[r.id] = i);
+  const hubTotals = dep => {
+    const rs = dr.filter(r=>r.dispatchId===dep.id);
+    return { n: rs.length, cust: new Set(rs.flatMap(r=>r.stopIds)).size,
+             bottles: rs.reduce((s,r)=>s+r.bottles,0), km: Math.round(rs.reduce((s,r)=>s+r.km,0)*10)/10 };
+  };
+  $("#hubSummary").innerHTML = dr.length ? `<button class="chip hub-chip ${!hubFilter?'on':''}" data-hub-filter="">All hubs · ${dr.length} routes</button>` +
+    (state.depots||[]).map(dep=>{
+      const t = hubTotals(dep); if (!t.n) return "";
+      return `<button class="chip hub-chip ${hubFilter===dep.id?'on':''}" data-hub-filter="${dep.id}">${dep.name}: <strong>${t.n} routes</strong> · ${t.cust} customers · ${t.bottles} bottles</button>`;
+    }).join("") : "";
+  document.querySelectorAll("[data-hub-filter]").forEach(b=> b.onclick = ()=>{ hubFilter = b.dataset.hubFilter || null; render(); });
+  let visible = dr.filter(r=>{
     const veh = vehById(r.vehicleId);
     const txt = (veh?.label||"") + " " + (veh?.driver||"") + " " + r.stopIds.map(id=>{const c=custById(id); return c? c.name+" "+c.area : "";}).join(" ");
     return (!q || txt.toLowerCase().includes(q)) && (!af || r.stopIds.some(id=>custById(id)?.area===af));
-  }).map((r,i)=>{
+  });
+  if (hubFilter) visible = visible.filter(r=>r.dispatchId===hubFilter);
+  const cardHtml = (r)=>{
+    const i = colorIdx[r.id] || 0;
     const veh = vehById(r.vehicleId);
     const over = r.bottles > (veh?.capacityBottles||0);
     const areaTxt = [...new Set(r.stopIds.map(id=>custById(id)?.area).filter(Boolean))].join(" · ");
@@ -798,13 +814,22 @@ function render(){
       <p>${veh?.driver||""} · ${veh?.type||""} · ${veh?.capacityBottles||""} bottles · ${depotById(r.dispatchId)?.name||""}</p>
       <p class="nums">${r.stopIds.length} customers · ${r.km} km · ${r.bottles}/${veh?.capacityBottles||""} bottles · ~${r.mins} min</p>
       <p>${areaTxt}</p>
-      <p>This truck this week: ${new Set(state.routes.filter(x=>x.vehicleId===r.vehicleId).flatMap(x=>x.stopIds)).size} / target ~${state.perTruck}</p>
+      <p>This truck this week: ${new Set(state.routes.filter(x=>x.vehicleId===r.vehicleId).flatMap(x=>x.stopIds)).size} / target ~${custPerFor(veh?.type||"")}</p>
       <a class="btn small ghost" target="_blank" rel="noopener" href="${gmapsLink(r)}" onclick="event.stopPropagation()">Open in Google Maps ↗</a>
       <a class="btn small teal" target="_blank" rel="noopener" href="${waLink(r)}" onclick="event.stopPropagation()">📤 Send to driver</a>
     </article>`;
+  };
+  const groupIds = [...(state.depots||[]).map(d=>d.id), ...new Set(visible.map(r=>r.dispatchId))];
+  $("#routeCards").innerHTML = [...new Set(groupIds)].map(gid=>{
+    const rs = visible.filter(r=>r.dispatchId===gid);
+    if (!rs.length) return "";
+    const dep = depotById(gid);
+    const cust = new Set(rs.flatMap(r=>r.stopIds)).size;
+    const bot = rs.reduce((s,r)=>s+r.bottles,0), kmT = Math.round(rs.reduce((s,r)=>s+r.km,0)*10)/10;
+    return `<div class="hub-group-head">${dep?.name||"Hub"} — ${rs.length} route${rs.length>1?"s":""} · ${cust} customers · ${bot} bottles · ${kmT} km</div>` + rs.map(cardHtml).join("");
   }).join("") || `<p class="hint">No routes for ${selectedDay} yet — tick customers above and tap Plan Routes.</p>`;
   document.querySelectorAll(".route-card").forEach(el=> el.onclick = ()=>{ selectedRouteId = el.dataset.route; mapFocus = el.dataset.route; render(); });
-  renderTimeline(dr);
+  renderTimeline(visible);
 
   renderMap(dr);
   renderStopPanel();
