@@ -19,21 +19,38 @@ const custById = id => state.customers.find(c => c.id === id);
 const vehById = id => state.vehicles.find(v => v.id === id);
 const depotById = id => (state.depots||[]).find(d => d.id === id) || (state.depots||[])[0];
 function defaultFleetPlan(){
-  // The real daily fleet as specified by the user 2026-11-20. Everything here
-  // is editable in ⚙ Advanced → Fleet setup; "Rebuild fleet" applies it.
+  // The real daily fleet as specified by the user 2026-11-20, matched to hubs
+  // BY NAME (hub cards can be renamed/reordered, ids alone mislead).
+  // Everything is editable in ⚙ Advanced → Fleet setup; "Rebuild fleet" applies it.
+  const SPEC = [
+    [/kamaha/i,            { "Mazda": 17, "Shehzore": 1, "FAW": 1 }],   // Kamaha — 19
+    [/dha/i,               { "Shehzore": 1, "Bolan": 1 }],              // DHA Water shop — 2
+    [/samsa/i,             { "Mazda": 20, "Shehzore": 4 }],             // Samsani — 24
+    [/lda/i,               { "Mazda": 10 }],                            // LDA Watershop — 10
+    [/h[au]rbanspura/i,    { "Mazda": 13, "Shehzore": 3 }]              // Harbanspura — 16 (split assumed, editable)
+  ];
+  const counts = {};
+  for (const dep of (state.depots||[])){
+    const hit = SPEC.find(([re]) => re.test(dep.name || ""));
+    counts[dep.id] = hit ? { ...hit[1] } : {};
+  }
   return {
     caps: { "Mazda": 160, "Shehzore": 90, "Ravi / Pick-up": 60, "Bolan": 45, "FAW": 50 },
     custPer: {},
-    counts: {
-      dp1: { "Mazda": 17, "Shehzore": 1, "FAW": 1 },              // Kamaha — 19
-      dp2: { "Shehzore": 1, "Bolan": 1 },                          // DHA Water shop — 2
-      dp3: { "Mazda": 20, "Shehzore": 4 },                         // Samsani — 24
-      dp4: { "Mazda": 10 },                                        // LDA Watershop — 10
-      dp5: { "Mazda": 13, "Shehzore": 3 }                          // Harbanspura — 16 (split assumed, editable)
-    }
+    counts
   };
 }
-function fleetPlan(){ return state.fleetPlan || defaultFleetPlan(); }
+const OLD_DEFAULT_COUNTS = { dp1: { "Mazda": 17, "Shehzore": 1, "FAW": 1 }, dp2: { "Shehzore": 1, "Bolan": 1 }, dp3: { "Mazda": 20, "Shehzore": 4 }, dp4: { "Mazda": 10 }, dp5: { "Mazda": 13, "Shehzore": 3 } };
+function fleetPlan(){
+  if (!state.fleetPlan) return defaultFleetPlan();
+  // One-time correction: the first default keyed counts by depot id and put
+  // the DHA/Harbanspura assignments on each other's rows (the user had
+  // renamed the cards the other way round). If the saved plan still equals
+  // that first default untouched, regenerate it name-matched.
+  if (JSON.stringify(state.fleetPlan.counts) === JSON.stringify(OLD_DEFAULT_COUNTS))
+    return defaultFleetPlan();
+  return state.fleetPlan;
+}
 function custPerFor(type){
   // Customers per vehicle for this type: per-type setting wins, else the
   // global Customers-per-truck value.
