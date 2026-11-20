@@ -320,7 +320,11 @@ function recalcRoute(r){
 /* ---------- planning ---------- */
 function planRoutes(){
   const prevUnassigned = totalUnassigned();
-  const serving = state.customers.filter(c => c.serveThisWeek);
+  // Safety fence: a customer whose coordinates are missing or outside
+  // Lahore would stretch a route (and the map) across the world. Leave
+  // them out and report the count instead of poisoning every route.
+  const badCoord = state.customers.filter(c => c.serveThisWeek && !inLahore(c.lat, c.lng));
+  const serving = state.customers.filter(c => c.serveThisWeek && inLahore(c.lat, c.lng));
   if (!serving.length || !state.vehicles.length){ state.routes = []; save(); render(); return; }
   const routes = [];
   let rid = 1;
@@ -394,6 +398,7 @@ function planRoutes(){
   selectedRouteId = routes.find(r=>r.day===selectedDay)?.id || routes[0]?.id || null;
   mapFocus = "ALL";
   save(); render();
+  if (badCoord.length) alert(`⚠ ${badCoord.length} ticked customer(s) were LEFT OUT because their coordinates are missing or outside Lahore. Fix them with ⚙ Advanced → 📍 Fill missing coordinates, then tap Plan Routes again.`);
   if (prevUnassigned) alert(`Plan Routes done: ${routes.length} routes built. ${prevUnassigned} unassigned customer(s) were put back onto routes.`);
 }
 
@@ -1339,21 +1344,29 @@ function parseCsv(text){
    Photon first (fast, no key), Nominatim as fallback. Queries are biased
    to Lahore with a bounding box. Used by Add Customer, CSV import and the
    "fill missing coordinates" sweep. */
+const GEO_BBOX = { minLat: 31.25, maxLat: 31.75, minLng: 74.05, maxLng: 74.65 }; // Lahore
+function inLahore(lat, lng){
+  return isFinite(lat) && isFinite(lng) && lat > GEO_BBOX.minLat && lat < GEO_BBOX.maxLat && lng > GEO_BBOX.minLng && lng < GEO_BBOX.maxLng;
+}
 async function geocodeOnce(q){
   try {
     const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&bbox=74.05,31.25,74.65,31.75`);
     if (r.ok){
       const j = await r.json();
       const f = j && j.features && j.features[0];
-      if (f && f.geometry && f.geometry.coordinates)
-        return { lng: +f.geometry.coordinates[0], lat: +f.geometry.coordinates[1] };
+      if (f && f.geometry && f.geometry.coordinates){
+        const hit = { lng: +f.geometry.coordinates[0], lat: +f.geometry.coordinates[1] };
+        // Photon's bbox is only a bias, not a filter — hard-reject anything
+        // outside Lahore or a bad pin will stretch routes across the world.
+        if (inLahore(hit.lat, hit.lng)) return hit;
+      }
     }
   } catch(e){ /* fall through to Nominatim */ }
   try {
     const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=pk&q=${encodeURIComponent(q)}`);
     if (r.ok){
       const j = await r.json();
-      if (j && j[0]) return { lat: +j[0].lat, lng: +j[0].lon };
+      if (j && j[0]){ const hit = { lat: +j[0].lat, lng: +j[0].lon }; if (inLahore(hit.lat, hit.lng)) return hit; }
     }
   } catch(e){ /* no result */ }
   return null;
@@ -1404,8 +1417,11 @@ async function geocodeMissing(list, progress){
     const hit = c.address ? await geocodeAddress(c.address, c.area) : null;
     if (hit){ c.lat = Math.round(hit.lat*1e6)/1e6; c.lng = Math.round(hit.lng*1e6)/1e6; exact++; }
     else {
-      const ctr = areaCentre(c.area) || depotCentreFor(c);
-      if (ctr){ c.lat = Math.round(ctr.lat*1e6)/1e6; c.lng = Math.round(ctr.lng*1e6)/1e6; approx++; }
+      // Never leave a customer at 0,0 — a single such pin stretches routes
+      // and the map across the world. Last resort: the nearest hub.
+      let ctr = areaCentre(c.area) || depotCentreFor(c);
+      if (!ctr && (state.depots||[]).length) ctr = { lat: state.depots[0].lat, lng: state.depots[0].lng };
+      if (ctr && inLahore(ctr.lat, ctr.lng)){ c.lat = Math.round(ctr.lat*1e6)/1e6; c.lng = Math.round(ctr.lng*1e6)/1e6; approx++; }
       else failed++;
     }
     if (i > 0 && i % 50 === 0) save(); // keep progress — big files take a while
@@ -1502,12 +1518,13 @@ function importCsv(file){
       const rec = {
         id: (ix("id")>=0 && +r[ix("id")]) || Math.max(0, ...state.customers.map(c=>c.id)) + 1,
         name: r[ix("name")], area: inferArea(ix("area")>=0 ? r[ix("area")] : "", ix("address")>=0 ? (r[ix("address")] || "") : ""), address: ix("address")>=0 ? (r[ix("address")] || "") : "",
-        lat: ix("lat")>=0 ? +r[ix("lat")] : 0, lng: ix("lng")>=0 ? +r[ix("lng")] : 0,
+        lat: ix("lat")>=0 ? +r[ix("lat")] : 0, lng: ix("lng")>=0 ? +r[ix("lng")] : 0, // sanitised below: anything outside Lahore counts as missing
         bottlesPerDrop: ix("bottlesPerDrop")>=0 ? (+r[ix("bottlesPerDrop")] || 2) : 2,
         deliveryDays: normalizeDays(ix("deliveryDays")>=0 ? r[ix("deliveryDays")] : ""),
         phone: ix("phone")>=0 ? (r[ix("phone")] || "") : "",
         serveThisWeek: ix("serveThisWeek")>=0 ? /^(true|1|yes)$/i.test(r[ix("serveThisWeek")]) : true,
       };
+      if (rec.lat && rec.lng && !inLahore(rec.lat, rec.lng)){ rec.lat = 0; rec.lng = 0; } // garbled/outside coords -> treat as missing, never as a real pin
       const ex = custById(rec.id);
       if (ex){ Object.assign(ex, rec); updated++; } else { state.customers.push(rec); added++; }
       importedIds.add(rec.id);
