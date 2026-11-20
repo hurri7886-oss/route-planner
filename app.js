@@ -647,6 +647,14 @@ function renderFleetSetup(){
     if (el) el.innerHTML = `Total: ${Object.keys(p.caps).map(t=>`${tf(t)} × ${t}`).join(" · ")} = <strong>${g} vehicles</strong>`;
   };
   host.querySelectorAll("[data-fcap],[data-fcount]").forEach(inp=> inp.addEventListener("input", recount));
+  // Persist the setup (and per-type customer numbers) as soon as a field is
+  // committed — counts/capacities apply on Rebuild, customers-per-type at once.
+  host.querySelectorAll("[data-fcap],[data-fcount],[data-fcust]").forEach(inp=> inp.addEventListener("change", ()=>{
+    const p = readFleetPlanUI(); if (!p) return;
+    state.fleetPlan = p;
+    if (p.custPer) state.custPerType = p.custPer;
+    save();
+  }));
   const addBtn = $("#addTypeBtn");
   if (addBtn) addBtn.onclick = ()=>{
     const name = ($("#newTypeName").value || "").trim();
