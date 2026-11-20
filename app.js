@@ -1741,12 +1741,15 @@ async function boot(){
     try {
       const st = await sbFetchState();
       sbConnected = true;
-      if (st && Array.isArray(st.customers) && st.customers.length){
+      if (st){
+        // ANY saved shared state wins — including one with zero customers
+        // (an emptied list is a legitimate state after "Remove ALL
+        // customers"; reseeding here once wiped a team's hub/fleet setup).
         state = st;               // shared team data wins
         lastSnapshot = cloneState(st);
         cacheLocal();             // refresh the offline cache (no re-upload)
       } else {
-        await seed();             // shared state empty -> seed; save() uploads it
+        await seed();             // no shared state row at all -> first run
       }
       fromShared = true;
     } catch(e){
