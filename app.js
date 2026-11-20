@@ -677,22 +677,32 @@ function render(){
     const nv = state.vehicles.filter(v=>v.dispatchId===dep.id).length;
     const nc = state.customers.filter(c=>c.dispatchId===dep.id).length;
     const off = dep.enabled === false;
-    return `<div class="stop"><span class="sp"><strong>${dep.name}</strong> (${dep.type}) — ${dep.area} · ${nc} customers · ${nv} vehicles ${off ? '· <strong style="color:#c0392b">DISABLED</strong>' : ''}<br>
-      <small>${dep.address}</small></span>
-      <input data-dep-name="${dep.id}" value="${dep.name}" aria-label="Dispatch point name">
-      <input data-dep-address="${dep.id}" value="${dep.address || ""}" placeholder="Full street address" aria-label="Dispatch point address" style="width:220px">
-      <input data-dep-lat="${dep.id}" type="number" step="any" value="${dep.lat}" aria-label="Latitude" style="width:100px">
-      <input data-dep-lng="${dep.id}" type="number" step="any" value="${dep.lng}" aria-label="Longitude" style="width:100px">
-      <button class="btn small primary" data-dep-save="${dep.id}">Save</button>
-      <button class="btn small ${off ? 'teal' : 'ghost'}" data-dep-toggle="${dep.id}">${off ? '▶ Enable' : '⏸ Disable'}</button>
-      <span style="flex-basis:100%"></span>
-      <small style="align-self:center"><strong>Vehicles running from this hub:</strong></small>
-      ${[...new Set(state.vehicles.filter(v=>v.dispatchId===dep.id).map(v=>v.type))].map(t=>{
-        const homed = state.vehicles.filter(v=>v.dispatchId===dep.id && v.type===t).length;
-        const val = dep.alloc && dep.alloc[t] != null ? dep.alloc[t] : homed;
-        return `<label style="font-size:12.5px">${t}: <input type="number" min="0" max="${homed}" step="1" value="${val}" data-dep-alloc="${dep.id}" data-type="${t}" style="width:56px" aria-label="${t} running from ${dep.name}"> <span style="color:#607d8b">of ${homed}</span></label>`;
-      }).join("")}
-      <small style="color:#607d8b">Set 0 to keep all of that type parked. Takes effect on Save → Plan Routes.</small></div>`;
+    const types = [...new Set(state.vehicles.filter(v=>v.dispatchId===dep.id).map(v=>v.type))];
+    return `<div class="depot-card">
+      <div class="dc-head">
+        <div class="dc-title"><strong>${dep.name}</strong> <span class="dc-type">${dep.type}</span>${off ? ' <span class="dc-off">DISABLED</span>' : ''}<br>
+        <small>${dep.area} · ${nv} vehicles based here · ${nc} customers</small></div>
+        <button class="btn small ${off ? 'teal' : 'ghost'}" data-dep-toggle="${dep.id}">${off ? '▶ Enable this hub' : '⏸ Disable this hub'}</button>
+      </div>
+      <div class="dc-grid">
+        <label>Hub name <input data-dep-name="${dep.id}" value="${dep.name}" aria-label="Dispatch point name"></label>
+        <label>Address <input data-dep-address="${dep.id}" value="${dep.address || ""}" placeholder="Full street address" aria-label="Dispatch point address"></label>
+        <label>Latitude <input data-dep-lat="${dep.id}" type="number" step="any" value="${dep.lat}" aria-label="Latitude"></label>
+        <label>Longitude <input data-dep-lng="${dep.id}" type="number" step="any" value="${dep.lng}" aria-label="Longitude"></label>
+      </div>
+      <div class="dc-fleet">
+        <div class="dc-fleet-title">🚚 Vehicles running from this hub</div>
+        <div class="dc-types">
+          ${types.map(t=>{
+            const homed = state.vehicles.filter(v=>v.dispatchId===dep.id && v.type===t).length;
+            const val = dep.alloc && dep.alloc[t] != null ? dep.alloc[t] : homed;
+            return `<div class="dc-typebox"><span>${t}</span><input type="number" min="0" max="${homed}" step="1" value="${val}" data-dep-alloc="${dep.id}" data-type="${t}" aria-label="${t} running from ${dep.name}"> <small>of ${homed} based</small></div>`;
+          }).join("")}
+        </div>
+        <small class="dc-hint">Set 0 to keep all of that type parked at this hub.</small>
+      </div>
+      <div class="dc-foot"><button class="btn primary" data-dep-save="${dep.id}">Save changes</button></div>
+    </div>`;
   }).join("");
   document.querySelectorAll("[data-dep-toggle]").forEach(b=> b.onclick = ()=>{
     const dep = depotById(b.dataset.depToggle); if (!dep) return;

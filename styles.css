@@ -72,6 +72,24 @@ input[type=search],select{padding:8px;border:1px solid #c8d6e2;border-radius:8px
 .stop-pin{width:22px;height:22px;border-radius:50%;color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);cursor:pointer}
 .depot-pin{width:24px;height:24px;border-radius:50%;background:#f9a825;color:#4e342e;font-size:12px;font-weight:800;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);cursor:grab}
 .depot-pin.disabled{background:#9aa7b1;color:#fff;opacity:.55}
+.depot-card{background:#fff;border:1px solid #d7e0e6;border-radius:12px;padding:14px 16px;margin:0 0 14px;box-shadow:0 1px 3px rgba(16,42,67,.06)}
+.dc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.dc-title strong{font-size:16px;color:#102a43}
+.dc-title small{color:#607d8b}
+.dc-type{color:#607d8b;font-size:12.5px}
+.dc-off{color:#c0392b;font-weight:800;font-size:12px}
+.dc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.dc-grid label{font-size:12px;font-weight:600;color:#486581;display:grid;gap:4px}
+.dc-grid input{width:100%;box-sizing:border-box}
+.dc-fleet{margin-top:12px;background:#f4f8fa;border:1px solid #e1ebf0;border-radius:10px;padding:10px 12px}
+.dc-fleet-title{font-weight:700;font-size:13px;color:#102a43;margin-bottom:8px}
+.dc-types{display:flex;gap:10px;flex-wrap:wrap}
+.dc-typebox{background:#fff;border:1px solid #d7e0e6;border-radius:8px;padding:8px 10px;min-width:140px}
+.dc-typebox>span{font-size:12.5px;font-weight:700;color:#334e68;display:block;margin-bottom:4px}
+.dc-typebox input{width:64px}
+.dc-typebox small{color:#607d8b}
+.dc-hint{color:#607d8b;display:block;margin-top:8px}
+.dc-foot{display:flex;justify-content:flex-end;margin-top:12px}
 .depot-pop{min-width:190px}
 .depot-pop .dp-edit{display:flex;flex-direction:column;gap:6px;align-items:stretch;margin-top:6px}
 .depot-pop .dp-edit label{display:flex;gap:6px;align-items:center;justify-content:space-between}
