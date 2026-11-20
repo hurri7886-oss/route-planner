@@ -152,6 +152,7 @@
       <input type="file" id="importCsvInput" accept=".csv,text/csv" hidden>
     </label>
     <button class="btn ghost" id="geocodeMissingBtn">📍 Fill missing coordinates from addresses</button>
+    <button class="btn ghost danger" id="clearCustomersBtn">🗑 Remove ALL customers (empty the list)</button>
     <button class="btn ghost danger" id="resetBtn">Reset to seed data (500 customers)</button>
   </div>
   <p class="hint">Customer CSV — one row per customer: <strong>id, name, area, address, lat, lng, bottles (ordered per delivery), delivery days, phone</strong>. Header names are flexible (latitude/longitude, bottles ordered, day of delivery, mobile — all understood). Delivery days can be "Mon Thu", "Mon,Thu", full names like "Wednesday" — or an actual delivery date (21/11/2026, 2026-11-21, "21 Nov 2026"), which is converted to that weekday. Same id = update that customer; new id = add. Rows without coordinates are offered an automatic address lookup after import.</p>

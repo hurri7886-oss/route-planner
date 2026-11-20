@@ -1633,6 +1633,17 @@ function wire(){
   $("#exportJsonBtn").onclick = ()=> download(JSON.stringify(state, null, 2), "route-planner-backup.json", "application/json");
   $("#importCsvInput").onchange = e=>{ if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ""; };
   $("#resetBtn").onclick = async ()=>{ if (confirm("Reset the SHARED team data to the original 500-customer seed? This replaces everyone's data.")){ localStorage.removeItem(LS_KEY); await seed(); render(); } };
+  $("#clearCustomersBtn").onclick = ()=>{
+    if (!state.customers.length){ alert("The customer list is already empty."); return; }
+    if (!confirm(`Remove ALL ${state.customers.length} customers from the SHARED team data?\n\nYour hubs, fleet and settings stay untouched. Routes will be cleared too. Do this only if you are about to import your own customer file.`)) return;
+    if (!confirm("Are you sure? This cannot be undone from the app (your CSV file is your backup).")) return;
+    state.customers = [];
+    state.routes = [];
+    state.unassigned = {};
+    selectedRouteId = null; mapFocus = "ALL";
+    save(); render();
+    alert("All customers removed. Now import your own file: ⬆ Import customers CSV.");
+  };
   const geoBtn = $("#geocodeBtn");
   if (geoBtn) geoBtn.onclick = async ()=>{
     const form = document.getElementById("addCustForm");
