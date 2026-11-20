@@ -292,7 +292,7 @@ function routeTotals(stops, depot){ // stops start/end at their dispatch point
   const mins = Math.round(km/28*60 + stops.length*8); // ~28 km/h city + 8 min/stop (user-set 2026-11-20)
   return { km: Math.round(km*10)/10, bottles, mins };
 }
-function sequence(stops, depot){ // nearest neighbour + 2-opt, dispatch point start/end
+function sequence(stops, depot, skipOpt){ // nearest neighbour + 2-opt, dispatch point start/end
   if (stops.length < 2) return stops.slice();
   const dep = depot || (state.depots||[])[0];
   const left = stops.slice(), out = []; let cur = dep;
@@ -302,7 +302,7 @@ function sequence(stops, depot){ // nearest neighbour + 2-opt, dispatch point st
     cur = left.splice(bi,1)[0]; out.push(cur);
   }
   const dist = arr => routeTotals(arr, dep).km;
-  let improved = true;
+  let improved = !skipOpt; // skipOpt: nearest-neighbour only (very long merged routes)
   while (improved){
     improved = false;
     for (let i=0;i<out.length-1;i++) for (let j=i+1;j<out.length;j++){
@@ -396,6 +396,7 @@ function planRoutes(){
       }
     });
   }
+  const mergedCount = consolidateRoutes(routes);
   const tidied = tidyRoutes(routes);
   state.routes = routes;
   state.unassigned = {}; // a fresh plan puts everyone back on routes — pool empties
@@ -405,8 +406,72 @@ function planRoutes(){
   if (badCoord.length) alert(`⚠ ${badCoord.length} ticked customer(s) were LEFT OUT because their coordinates are missing or outside Lahore. Fix them with ⚙ Advanced → 📍 Fill missing coordinates, then tap Plan Routes again.`);
   const bits = [];
   if (prevUnassigned) bits.push(`${prevUnassigned} unassigned customer(s) were put back onto routes.`);
+  if (mergedCount) bits.push(`🚌 Consolidated ${mergedCount} route(s) — if one vehicle can carry the day's stops, the others stay parked.`);
   if (tidied) bits.push(`🧠 Smart tidy moved ${tidied} far-away stop(s) onto nearer routes — no lone stop dragging a vehicle across the map.`);
   if (bits.length) alert(`Plan Routes done: ${routes.length} routes built. ` + bits.join(" "));
+}
+
+/* ---------- consolidate: never roll two vehicles when one can carry the day ----------
+   Routes are first built per weekly vehicle base, so a quiet day can split
+   a hub's stops across several vehicles that are all nearly empty. Merge
+   same-day, same-hub routes into one vehicle whenever the combined load
+   fits that vehicle's bottle capacity AND its customers-per-vehicle limit —
+   the other vehicles stay parked. Nearest clusters merge first, and a merge
+   is rejected if it would add more than ~15% extra km. */
+function consolidateRoutes(routes){
+  let merges = 0;
+  const touched = new Set();
+  const cenOf = arr => ({ lat: arr.reduce((s,c)=>s+c.lat,0)/(arr.length||1), lng: arr.reduce((s,c)=>s+c.lng,0)/(arr.length||1) });
+  let changed = true;
+  while (changed){
+    changed = false;
+    const groups = {};
+    routes.forEach(r=>{ (groups[r.day + "|" + r.dispatchId] = groups[r.day + "|" + r.dispatchId] || []).push(r); });
+    for (const g of Object.values(groups)){
+      if (g.length < 2) continue;
+      const small = g.slice().sort((a,b)=> a.stopIds.length - b.stopIds.length)[0];
+      const sStops = small.stopIds.map(custById).filter(Boolean);
+      if (!sStops.length) continue;
+      const sc = cenOf(sStops);
+      let best = null;
+      for (const other of g){
+        if (other === small) continue;
+        const oStops = other.stopIds.map(custById).filter(Boolean);
+        if (!oStops.length) continue;
+        const carrier = [vehById(small.vehicleId), vehById(other.vehicleId)].filter(Boolean)
+          .find(v => small.bottles + other.bottles <= (v.capacityBottles || 1e9)
+                  && small.stopIds.length + other.stopIds.length <= custPerFor(v.type));
+        if (!carrier) continue;
+        const d = hav(sc, cenOf(oStops));
+        if (!best || d < best.d) best = { other, oStops, carrier, d };
+      }
+      if (best){
+        const dep = routeDepot(small);
+        const all = sStops.concat(best.oStops);
+        const mergedStops = sequence(all, dep, true); // NN-only while merging (fast); polished once at the end
+        const t = routeTotals(mergedStops, dep);
+        // Accept only if the merged run stays within a working day
+        // (9h at the team's own 8 min/stop + driving) and adds little km.
+        if (t.km <= (small.km + best.other.km) * 1.15 + 2 && t.mins <= 540){
+          best.other.stopIds = mergedStops.map(c=>c.id);
+          best.other.vehicleId = best.carrier.id;
+          recalcRoute(best.other);
+          touched.add(best.other.id);
+          routes.splice(routes.indexOf(small), 1);
+          merges++; changed = true;
+          break; // regroup after every merge
+        }
+      }
+    }
+  }
+  // One proper 2-opt polish on each route that came out of a merge.
+  for (const r of routes){
+    if (!touched.has(r.id) || r.stopIds.length < 3 || r.stopIds.length > 60) continue;
+    const stops = r.stopIds.map(custById).filter(Boolean);
+    r.stopIds = sequence(stops, routeDepot(r)).map(c=>c.id);
+    recalcRoute(r);
+  }
+  return merges;
 }
 
 /* ---------- smart tidy: keep lone far-away stops off clustered routes ----------
