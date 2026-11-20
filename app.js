@@ -1484,8 +1484,11 @@ function dateToDay(tok){
   const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
   let m = tok.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (m) return DOW[new Date(+m[1], +m[2]-1, +m[3]).getDay()];
-  m = tok.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/); // DD/MM/YYYY (Pakistan format)
-  if (m){ let y = +m[3]; if (y < 100) y += 2000; return DOW[new Date(y, +m[2]-1, +m[1]).getDay()]; }
+  m = tok.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (m){ let y = +m[3]; if (y < 100) y += 2000;
+    let d = +m[1], mo = +m[2];
+    if (mo > 12 && d <= 12){ const t = d; d = mo; mo = t; } // US format MM/DD/YYYY: second number can't be a month
+    return DOW[new Date(y, mo-1, d).getDay()]; }
   if (/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(tok) && /\d/.test(tok)){
     const d = new Date(tok);
     if (!isNaN(d)) return DOW[d.getDay()];
