@@ -1103,10 +1103,18 @@ function drawLeaflet(dr){
   lastMapSig = sig;
   lmapLayer.clearLayers();
   const allPts = [];
+  const seenPts = [];
   (state.depots||[]).forEach(dep=>{
-    const mk = L.marker([dep.lat, dep.lng], { draggable: true,
+    if (!isFinite(dep.lat) || !isFinite(dep.lng)) return; // a broken coordinate would poison fitBounds
+    let dLat = dep.lat, dLng = dep.lng;
+    // Hubs sharing (almost) the same spot stack into a single visible pin.
+    // Fan duplicates out slightly for display so every hub stays visible.
+    const clash = seenPts.filter(p => Math.abs(p[0]-dep.lat) < 0.0005 && Math.abs(p[1]-dep.lng) < 0.0005).length;
+    if (clash){ const ang = clash * 2.4; dLat += Math.sin(ang) * 0.0013; dLng += Math.cos(ang) * 0.0013; }
+    seenPts.push([dep.lat, dep.lng]);
+    const mk = L.marker([dLat, dLng], { draggable: true,
       icon: L.divIcon({ className: "", html: `<div class="depot-pin${dep.enabled===false ? " disabled" : ""}">D</div>`, iconSize: [24,24], iconAnchor: [12,12] }) });
-    mk.bindTooltip(dep.name, { direction: "top", offset: [0,-14] });
+    mk.bindTooltip(dep.name, { permanent: true, direction: "top", offset: [0,-14], className: "depot-label" });
     const popEl = buildDepotPopup(dep);
     mk.bindPopup(popEl);
     mk.on("popupopen", ()=>{
@@ -1122,7 +1130,7 @@ function drawLeaflet(dr){
       if (ll) moveDepot(dep.id, ll.lat, ll.lng);
     });
     mk.addTo(lmapLayer);
-    allPts.push([dep.lat, dep.lng]);
+    allPts.push([dLat, dLng]);
   });
   dr.forEach((r,i)=>{
     const color = COLORS[i % COLORS.length];
